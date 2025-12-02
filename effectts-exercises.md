@@ -11,6 +11,19 @@ This document contains hands-on exercises for each module of the EffectTS course
 
 ---
 
+## Table of Contents
+
+1. [Module 1: Effect Fundamentals](#module-1-exercises-effect-fundamentals)
+2. [Module 2: Composition and Combinators](#module-2-exercises-composition-and-combinators)
+3. [Module 3: Context and Dependency Injection](#module-3-exercises-context-and-dependency-injection)
+4. [Module 4: React Integration](#module-4-exercises-react-integration)
+5. [Module 5: Svelte Integration](#module-5-exercises-svelte-integration)
+6. [Module 6: Advanced Patterns](#module-6-exercises-advanced-patterns)
+7. [Bonus Exercises](#bonus-exercises)
+8. [Testing Your Solutions](#testing-your-solutions)
+
+---
+
 ## Module 1 Exercises: Effect Fundamentals
 
 ### Exercise 1.1: Basic Effect Construction

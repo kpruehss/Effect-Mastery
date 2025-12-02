@@ -46,6 +46,8 @@ This is a complete, production-ready task management application built with Svel
 
 ---
 
+[↑ Back to Top](#table-of-contents)
+
 ## Project Setup
 
 ### Installation
@@ -107,6 +109,8 @@ export default {
 
 ---
 
+[↑ Back to Top](#table-of-contents)
+
 ## Project Structure
 
 ```
@@ -160,6 +164,8 @@ taskmaster/
 ```
 
 ---
+
+[↑ Back to Top](#table-of-contents)
 
 ## Domain Layer
 
@@ -311,6 +317,8 @@ export type AuthError =
 ```
 
 ---
+
+[↑ Back to Top](#table-of-contents)
 
 ## Service Layer
 
@@ -714,6 +722,8 @@ export const WebSocketServiceLive = Layer.scoped(
 
 ---
 
+[↑ Back to Top](#table-of-contents)
+
 ## Effect Layers
 
 **src/lib/effects/layers.ts**
@@ -746,6 +756,8 @@ export const AppRuntime = Layer.toRuntime(AppLayer).pipe(Effect.runSync)
 ```
 
 ---
+
+[↑ Back to Top](#table-of-contents)
 
 ## Utilities
 
@@ -810,6 +822,8 @@ export function createRefreshableEffect<A, E>(
 ```
 
 ---
+
+[↑ Back to Top](#table-of-contents)
 
 ## Components
 
@@ -1291,6 +1305,8 @@ export function createRefreshableEffect<A, E>(
 
 ---
 
+[↑ Back to Top](#table-of-contents)
+
 ## Routes
 
 ### Main Page
@@ -1424,6 +1440,8 @@ export function createRefreshableEffect<A, E>(
 
 ---
 
+[↑ Back to Top](#table-of-contents)
+
 ## Running the Project
 
 ### Development
@@ -1453,6 +1471,8 @@ VITE_WS_URL=ws://localhost:3000/ws
 For development, you can create a simple mock API server or use the built-in SvelteKit API routes with in-memory storage.
 
 ---
+
+[↑ Back to Top](#table-of-contents)
 
 ## Key Patterns Demonstrated
 

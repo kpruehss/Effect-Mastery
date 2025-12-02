@@ -77,6 +77,8 @@ const asyncEffect = Effect.async<number, string>((resume) => {
 
 ---
 
+[↑ Back to Top](#table-of-contents)
+
 ## Transforming Effects
 
 ### Map (Transform Success)
@@ -131,6 +133,8 @@ const normalized = pipe(
 ```
 
 ---
+
+[↑ Back to Top](#table-of-contents)
 
 ## Error Handling
 
@@ -190,6 +194,8 @@ const withDefault = pipe(
 ```
 
 ---
+
+[↑ Back to Top](#table-of-contents)
 
 ## Combining Effects
 
@@ -258,6 +264,8 @@ const combined = pipe(
 ```
 
 ---
+
+[↑ Back to Top](#table-of-contents)
 
 ## Context & Services
 
@@ -337,6 +345,8 @@ const program = pipe(
 ```
 
 ---
+
+[↑ Back to Top](#table-of-contents)
 
 ## React Integration
 
@@ -426,6 +436,8 @@ function useEffect<A, E>(effect: Effect.Effect<A, E>) {
 
 ---
 
+[↑ Back to Top](#table-of-contents)
+
 ## Svelte Integration
 
 ### Effect Store
@@ -488,6 +500,8 @@ const derived Store = derived(
 ```
 
 ---
+
+[↑ Back to Top](#table-of-contents)
 
 ## Common Patterns
 
@@ -569,6 +583,8 @@ const debounced = pipe(
 
 ---
 
+[↑ Back to Top](#table-of-contents)
+
 ## Testing
 
 ### Test Pure Effects
@@ -615,6 +631,8 @@ Effect.runPromise(test)
 ```
 
 ---
+
+[↑ Back to Top](#table-of-contents)
 
 ## Performance
 
@@ -668,6 +686,8 @@ const lazyData = Effect.suspend(() =>
 
 ---
 
+[↑ Back to Top](#table-of-contents)
+
 ## Type Patterns
 
 ### Discriminated Unions
@@ -710,6 +730,8 @@ type ServiceEffect<A, R> = Effect.Effect<A, never, R>
 
 ---
 
+[↑ Back to Top](#table-of-contents)
+
 ## Debugging
 
 ### Add Logging
@@ -744,6 +766,8 @@ const inspected = pipe(
 ```
 
 ---
+
+[↑ Back to Top](#table-of-contents)
 
 ## Common Imports
 
@@ -787,6 +811,8 @@ import { Schema } from "@effect/schema"
 
 ---
 
+[↑ Back to Top](#table-of-contents)
+
 ## Quick Tips
 
 1. **Use `pipe` for readability** - It makes data flow clear
@@ -801,6 +827,8 @@ import { Schema } from "@effect/schema"
 10. **Keep effects pure** - Describe, don't execute
 
 ---
+
+[↑ Back to Top](#table-of-contents)
 
 ## Resources
 

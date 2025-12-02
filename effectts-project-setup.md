@@ -9,9 +9,11 @@
 1. [React Project Setup](#react-project-setup)
 2. [Svelte Project Setup](#svelte-project-setup)
 3. [Shared Configuration](#shared-configuration)
-4. [Project Structure](#project-structure)
+4. [Project Structure Best Practices](#project-structure-best-practices)
 5. [Best Practices](#best-practices)
 6. [CI/CD Integration](#cicd-integration)
+7. [Environment Variables](#environment-variables)
+8. [Deployment](#deployment)
 
 ---
 
@@ -286,6 +288,8 @@ afterEach(() => {
 ```
 
 ---
+
+[↑ Back to Top](#table-of-contents)
 
 ## Svelte Project Setup
 
@@ -608,6 +612,8 @@ export default defineConfig({
 
 ---
 
+[↑ Back to Top](#table-of-contents)
+
 ## Shared Configuration
 
 ### ESLint Configuration
@@ -691,6 +697,8 @@ Create `.vscode/extensions.json`:
 
 ---
 
+[↑ Back to Top](#table-of-contents)
+
 ## Project Structure Best Practices
 
 ### Domain Layer
@@ -767,6 +775,8 @@ export const UserServiceLive = Layer.effect(UserService, makeUserService)
 ```
 
 ---
+
+[↑ Back to Top](#table-of-contents)
 
 ## Best Practices
 
@@ -847,6 +857,8 @@ const users = Effect.all(
 
 ---
 
+[↑ Back to Top](#table-of-contents)
+
 ## CI/CD Integration
 
 ### GitHub Actions Example
@@ -913,6 +925,8 @@ Add to `package.json`:
 
 ---
 
+[↑ Back to Top](#table-of-contents)
+
 ## Environment Variables
 
 ### React/Vite
@@ -950,6 +964,8 @@ import { PRIVATE_API_KEY } from "$env/static/private"
 ```
 
 ---
+
+[↑ Back to Top](#table-of-contents)
 
 ## Deployment
 

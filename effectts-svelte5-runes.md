@@ -40,6 +40,8 @@ let { userId } = $props<{ userId: string }>()
 
 ---
 
+[↑ Back to Top](#table-of-contents)
+
 ## Effect with $state
 
 ### Basic Pattern
@@ -162,6 +164,8 @@ export function createEffectState<A, E>(
 
 ---
 
+[↑ Back to Top](#table-of-contents)
+
 ## Effect with $derived
 
 ### Computed Effect Results
@@ -229,6 +233,8 @@ export function createEffectState<A, E>(
 ```
 
 ---
+
+[↑ Back to Top](#table-of-contents)
 
 ## Effect with $effect
 
@@ -329,6 +335,8 @@ export function createEffectState<A, E>(
 ```
 
 ---
+
+[↑ Back to Top](#table-of-contents)
 
 ## SvelteKit Integration
 
@@ -482,6 +490,8 @@ export const POST: RequestHandler = async ({ request }) => {
 ```
 
 ---
+
+[↑ Back to Top](#table-of-contents)
 
 ## Complete Examples
 
@@ -1038,6 +1048,8 @@ export const POST: RequestHandler = async ({ request }) => {
 
 ---
 
+[↑ Back to Top](#table-of-contents)
+
 ## Best Practices
 
 ### 1. Use $effect for Effect Execution
@@ -1111,6 +1123,8 @@ let user = $state(null)
 ```
 
 ---
+
+[↑ Back to Top](#table-of-contents)
 
 ## Migration from Stores
 

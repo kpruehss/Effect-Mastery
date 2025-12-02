@@ -1,7 +1,27 @@
 # EffectTS Frontend Mastery Course
 
-**A Comprehensive Guide for TypeScript Developers**  
+**A Comprehensive Guide for TypeScript Developers**
 *Leveraging Effect-TS in React and Svelte Applications*
+
+---
+
+## Table of Contents
+
+1. [Course Overview](#course-overview)
+2. [Module 1: Effect Fundamentals](#module-1-effect-fundamentals)
+3. [Module 2: Composition and Combinators](#module-2-composition-and-combinators)
+4. [Module 3: Dependency Injection with Context](#module-3-dependency-injection-with-context)
+5. [Module 4: React Integration](#module-4-react-integration)
+6. [Module 5: Svelte Integration](#module-5-svelte-integration)
+7. [Module 6: Advanced Patterns](#module-6-advanced-patterns)
+8. [Module 7: Real-World Project](#module-7-real-world-project)
+9. [Module 8: Testing Strategies](#module-8-testing-strategies)
+10. [Module 9: Performance and Optimization](#module-9-performance-and-optimization)
+11. [Module 10: Best Practices](#module-10-best-practices)
+12. [Appendix A: Effect-TS Cheat Sheet](#appendix-a-effect-ts-cheat-sheet)
+13. [Appendix B: Resources](#appendix-b-resources)
+14. [Course Completion Project Ideas](#course-completion-project-ideas)
+15. [Conclusion](#conclusion)
 
 ---
 
@@ -217,6 +237,8 @@ const optional = pipe(
 
 ---
 
+[↑ Back to Top](#table-of-contents)
+
 ## Module 2: Composition and Combinators
 
 ### 2.1 Sequential Composition
@@ -403,6 +425,8 @@ const createPost = (input: RawInput) =>
 ```
 
 ---
+
+[↑ Back to Top](#table-of-contents)
 
 ## Module 3: Dependency Injection with Context
 
@@ -664,6 +688,8 @@ const UserRepositoryLive = Layer.effect(
 ```
 
 ---
+
+[↑ Back to Top](#table-of-contents)
 
 ## Module 4: React Integration
 
@@ -955,6 +981,8 @@ function SignupForm() {
 
 ---
 
+[↑ Back to Top](#table-of-contents)
+
 ## Module 5: Svelte Integration
 
 ### 5.1 Effect Stores in Svelte
@@ -1228,6 +1256,8 @@ export const load: PageLoad = async ({ params, fetch }) => {
 ```
 
 ---
+
+[↑ Back to Top](#table-of-contents)
 
 ## Module 6: Advanced Patterns
 
@@ -1521,6 +1551,8 @@ const ConditionalFeature = () => {
 ```
 
 ---
+
+[↑ Back to Top](#table-of-contents)
 
 ## Module 7: Real-World Project
 
@@ -1979,6 +2011,8 @@ export const runtime = Layer.toRuntime(AppLayer).pipe(
 
 ---
 
+[↑ Back to Top](#table-of-contents)
+
 ## Module 8: Testing Strategies
 
 ### 8.1 Testing Pure Effects
@@ -2113,6 +2147,8 @@ describe("User repository properties", () => {
 
 ---
 
+[↑ Back to Top](#table-of-contents)
+
 ## Module 9: Performance and Optimization
 
 ### 9.1 Batching Requests
@@ -2221,6 +2257,8 @@ function UserCard({ userId }: { userId: string }) {
 ```
 
 ---
+
+[↑ Back to Top](#table-of-contents)
 
 ## Module 10: Best Practices
 
@@ -2411,6 +2449,8 @@ const parseResponse = (data: unknown) =>
 
 ---
 
+[↑ Back to Top](#table-of-contents)
+
 ## Appendix A: Effect-TS Cheat Sheet
 
 ### Core Functions
@@ -2485,6 +2525,8 @@ Effect.if(condition, {
 
 ---
 
+[↑ Back to Top](#table-of-contents)
+
 ## Appendix B: Resources
 
 ### Official Documentation
@@ -2505,6 +2547,8 @@ Effect.if(condition, {
 - Community examples on GitHub
 
 ---
+
+[↑ Back to Top](#table-of-contents)
 
 ## Course Completion Project Ideas
 
@@ -2534,6 +2578,8 @@ Effect.if(condition, {
    - File sharing with progress
 
 ---
+
+[↑ Back to Top](#table-of-contents)
 
 ## Conclusion
 
