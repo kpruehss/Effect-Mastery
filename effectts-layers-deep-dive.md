@@ -96,6 +96,8 @@ const LoggerWithCleanup = Layer.scoped(
 
 ---
 
+[↑ Back to Top](#table-of-contents)
+
 ## Layer Construction Patterns
 
 ### Pattern 1: Simple Service (No Dependencies)
@@ -273,6 +275,8 @@ const WebSocketConnectionLive = Layer.scoped(
 
 ---
 
+[↑ Back to Top](#table-of-contents)
+
 ## Layer Composition
 
 ### Sequential Composition (provide)
@@ -419,6 +423,8 @@ const ApiWithLoggingLive = Layer.effect(
 ```
 
 ---
+
+[↑ Back to Top](#table-of-contents)
 
 ## Advanced Layer Patterns
 
@@ -664,6 +670,8 @@ const withConnection = <A, E>(
 
 ---
 
+[↑ Back to Top](#table-of-contents)
+
 ## Managing Layer Lifecycles
 
 ### Scope and Lifetime
@@ -757,6 +765,8 @@ const DynamicLayer = Layer.unwrapEffect(
 ```
 
 ---
+
+[↑ Back to Top](#table-of-contents)
 
 ## Testing Strategies
 
@@ -885,6 +895,8 @@ const program = pipe(
 
 ---
 
+[↑ Back to Top](#table-of-contents)
+
 ## Real-World Architecture
 
 ### Layered Application Architecture
@@ -1005,6 +1017,8 @@ export const AppLayer = Layer.mergeAll(
 
 ---
 
+[↑ Back to Top](#table-of-contents)
+
 ## Performance Considerations
 
 ### Layer Initialization Performance
@@ -1083,6 +1097,8 @@ const AppLayer = Layer.mergeAll(
 
 ---
 
+[↑ Back to Top](#table-of-contents)
+
 ## Best Practices Summary
 
 1. **Keep layers pure** - No side effects in layer construction
@@ -1097,6 +1113,8 @@ const AppLayer = Layer.mergeAll(
 10. **Scope appropriately** - Application-wide vs request-scoped
 
 ---
+
+[↑ Back to Top](#table-of-contents)
 
 ## Additional Resources
 
