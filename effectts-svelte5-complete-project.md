@@ -470,111 +470,114 @@ export class TaskService extends Context.Tag("TaskService")<
 
 export const TaskServiceLive = Layer.effect(
   TaskService,
-  Effect.gen(function* () {
-    const api = yield* ApiClient
-    const tasks = yield* Ref.make<Task[]>([])
+  pipe(
+    ApiClient,
+    Effect.flatMap((api) =>
+      pipe(
+        Ref.make<Task[]>([]),
+        Effect.map((tasks) => ({
+          tasks,
 
-    return {
-    tasks,
-    
-    listTasks: (projectId?: string) =>
-      pipe(
-        api.get<unknown[]>(
-          projectId ? `/tasks?projectId=${projectId}` : "/tasks"
-        ),
-        Effect.flatMap((data) =>
-          Effect.all(data.map(validateTask), { concurrency: "unbounded" })
-        ),
-        Effect.tap((loadedTasks) => Ref.set(tasks, loadedTasks)),
-        Effect.mapError(() => ({ _tag: "TaskNotFound" as const, id: "all" }))
-      ),
-    
-    getTask: (id) =>
-      pipe(
-        api.get<unknown>(`/tasks/${id}`),
-        Effect.flatMap(validateTask),
-        Effect.mapError(() => ({ _tag: "TaskNotFound" as const, id }))
-      ),
-    
-    createTask: (input) => {
-      // Optimistic task
-      const optimisticTask: Task = {
-        id: `temp-${Date.now()}`,
-        title: input.title,
-        description: input.description,
-        status: input.status || "todo",
-        priority: input.priority,
-        projectId: input.projectId,
-        assigneeId: input.assigneeId,
-        dueDate: input.dueDate,
-        createdAt: new Date(),
-        updatedAt: new Date(),
-        _optimistic: true
-      }
-      
-      return pipe(
-        // Add optimistically
-        Ref.update(tasks, (ts) => [...ts, optimisticTask]),
-        Effect.flatMap(() =>
-          pipe(
-            validateCreateTaskInput(input),
-            Effect.flatMap((validated) => api.post<unknown>("/tasks", validated)),
-            Effect.flatMap(validateTask)
-          )
-        ),
-        Effect.tap((savedTask) =>
-          // Replace optimistic with real
-          Ref.update(tasks, (ts) =>
-            ts.map((t) => (t.id === optimisticTask.id ? savedTask : t))
-          )
-        ),
-        Effect.tapError(() =>
-          // Rollback on error
-          Ref.update(tasks, (ts) =>
-            ts.filter((t) => t.id !== optimisticTask.id)
-          )
-        ),
-        Effect.mapError(() => ({
-          _tag: "InvalidTaskData" as const,
-          errors: "Failed to create task"
+          listTasks: (projectId?: string) =>
+            pipe(
+              api.get<unknown[]>(
+                projectId ? `/tasks?projectId=${projectId}` : "/tasks"
+              ),
+              Effect.flatMap((data) =>
+                Effect.all(data.map(validateTask), { concurrency: "unbounded" })
+              ),
+              Effect.tap((loadedTasks) => Ref.set(tasks, loadedTasks)),
+              Effect.mapError(() => ({ _tag: "TaskNotFound" as const, id: "all" }))
+            ),
+
+          getTask: (id) =>
+            pipe(
+              api.get<unknown>(`/tasks/${id}`),
+              Effect.flatMap(validateTask),
+              Effect.mapError(() => ({ _tag: "TaskNotFound" as const, id }))
+            ),
+
+          createTask: (input) => {
+            // Optimistic task
+            const optimisticTask: Task = {
+              id: `temp-${Date.now()}`,
+              title: input.title,
+              description: input.description,
+              status: input.status || "todo",
+              priority: input.priority,
+              projectId: input.projectId,
+              assigneeId: input.assigneeId,
+              dueDate: input.dueDate,
+              createdAt: new Date(),
+              updatedAt: new Date(),
+              _optimistic: true
+            }
+
+            return pipe(
+              // Add optimistically
+              Ref.update(tasks, (ts) => [...ts, optimisticTask]),
+              Effect.flatMap(() =>
+                pipe(
+                  validateCreateTaskInput(input),
+                  Effect.flatMap((validated) => api.post<unknown>("/tasks", validated)),
+                  Effect.flatMap(validateTask)
+                )
+              ),
+              Effect.tap((savedTask) =>
+                // Replace optimistic with real
+                Ref.update(tasks, (ts) =>
+                  ts.map((t) => (t.id === optimisticTask.id ? savedTask : t))
+                )
+              ),
+              Effect.tapError(() =>
+                // Rollback on error
+                Ref.update(tasks, (ts) =>
+                  ts.filter((t) => t.id !== optimisticTask.id)
+                )
+              ),
+              Effect.mapError(() => ({
+                _tag: "InvalidTaskData" as const,
+                errors: "Failed to create task"
+              }))
+            )
+          },
+
+          updateTask: (id, input) =>
+            pipe(
+              api.put<unknown>(`/tasks/${id}`, input),
+              Effect.flatMap(validateTask),
+              Effect.tap((updatedTask) =>
+                Ref.update(tasks, (ts) =>
+                  ts.map((t) => (t.id === id ? updatedTask : t))
+                )
+              ),
+              Effect.mapError(() => ({ _tag: "TaskNotFound" as const, id }))
+            ),
+
+          deleteTask: (id) =>
+            pipe(
+              Ref.get(tasks),
+              Effect.flatMap((ts) => {
+                const task = ts.find((t) => t.id === id)
+                if (!task) {
+                  return Effect.fail({ _tag: "TaskNotFound" as const, id })
+                }
+
+                return pipe(
+                  // Remove optimistically
+                  Ref.update(tasks, (ts) => ts.filter((t) => t.id !== id)),
+                  Effect.flatMap(() => api.delete(`/tasks/${id}`)),
+                  Effect.tapError(() =>
+                    // Rollback on error
+                    Ref.update(tasks, (ts) => [...ts, task])
+                  )
+                )
+              })
+            )
         }))
       )
-    },
-    
-    updateTask: (id, input) =>
-      pipe(
-        api.put<unknown>(`/tasks/${id}`, input),
-        Effect.flatMap(validateTask),
-        Effect.tap((updatedTask) =>
-          Ref.update(tasks, (ts) =>
-            ts.map((t) => (t.id === id ? updatedTask : t))
-          )
-        ),
-        Effect.mapError(() => ({ _tag: "TaskNotFound" as const, id }))
-      ),
-    
-    deleteTask: (id) =>
-      pipe(
-        Ref.get(tasks),
-        Effect.flatMap((ts) => {
-          const task = ts.find((t) => t.id === id)
-          if (!task) {
-            return Effect.fail({ _tag: "TaskNotFound" as const, id })
-          }
-          
-          return pipe(
-            // Remove optimistically
-            Ref.update(tasks, (ts) => ts.filter((t) => t.id !== id)),
-            Effect.flatMap(() => api.delete(`/tasks/${id}`)),
-            Effect.tapError(() =>
-              // Rollback on error
-              Ref.update(tasks, (ts) => [...ts, task])
-            )
-          )
-        })
-      )
-    };
-  })
+    )
+  )
 )
 ```
 
@@ -603,59 +606,62 @@ export class ProjectService extends Context.Tag("ProjectService")<
 
 export const ProjectServiceLive = Layer.effect(
   ProjectService,
-  Effect.gen(function* () {
-    const api = yield* ApiClient
-    const projects = yield* Ref.make<Project[]>([])
+  pipe(
+    ApiClient,
+    Effect.flatMap((api) =>
+      pipe(
+        Ref.make<Project[]>([]),
+        Effect.map((projects) => ({
+          projects,
 
-    return {
-    projects,
-    
-    listProjects: () =>
-      pipe(
-        api.get<unknown[]>("/projects"),
-        Effect.flatMap((data) =>
-          Effect.all(data.map(validateProject), { concurrency: "unbounded" })
-        ),
-        Effect.tap((loadedProjects) => Ref.set(projects, loadedProjects)),
-        Effect.mapError(() => ({
-          _tag: "ProjectNotFound" as const,
-          id: "all"
+          listProjects: () =>
+            pipe(
+              api.get<unknown[]>("/projects"),
+              Effect.flatMap((data) =>
+                Effect.all(data.map(validateProject), { concurrency: "unbounded" })
+              ),
+              Effect.tap((loadedProjects) => Ref.set(projects, loadedProjects)),
+              Effect.mapError(() => ({
+                _tag: "ProjectNotFound" as const,
+                id: "all"
+              }))
+            ),
+
+          getProject: (id) =>
+            pipe(
+              api.get<unknown>(`/projects/${id}`),
+              Effect.flatMap(validateProject),
+              Effect.mapError(() => ({ _tag: "ProjectNotFound" as const, id }))
+            ),
+
+          createProject: (input) =>
+            pipe(
+              validateCreateProjectInput(input),
+              Effect.flatMap((validated) =>
+                api.post<unknown>("/projects", validated)
+              ),
+              Effect.flatMap(validateProject),
+              Effect.tap((newProject) =>
+                Ref.update(projects, (ps) => [...ps, newProject])
+              ),
+              Effect.mapError(() => ({
+                _tag: "InvalidProjectData" as const,
+                errors: "Failed to create project"
+              }))
+            ),
+
+          deleteProject: (id) =>
+            pipe(
+              api.delete(`/projects/${id}`),
+              Effect.tap(() =>
+                Ref.update(projects, (ps) => ps.filter((p) => p.id !== id))
+              ),
+              Effect.mapError(() => ({ _tag: "ProjectNotFound" as const, id }))
+            )
         }))
-      ),
-    
-    getProject: (id) =>
-      pipe(
-        api.get<unknown>(`/projects/${id}`),
-        Effect.flatMap(validateProject),
-        Effect.mapError(() => ({ _tag: "ProjectNotFound" as const, id }))
-      ),
-    
-    createProject: (input) =>
-      pipe(
-        validateCreateProjectInput(input),
-        Effect.flatMap((validated) =>
-          api.post<unknown>("/projects", validated)
-        ),
-        Effect.flatMap(validateProject),
-        Effect.tap((newProject) =>
-          Ref.update(projects, (ps) => [...ps, newProject])
-        ),
-        Effect.mapError(() => ({
-          _tag: "InvalidProjectData" as const,
-          errors: "Failed to create project"
-        }))
-      ),
-    
-    deleteProject: (id) =>
-      pipe(
-        api.delete(`/projects/${id}`),
-        Effect.tap(() =>
-          Ref.update(projects, (ps) => ps.filter((p) => p.id !== id))
-        ),
-        Effect.mapError(() => ({ _tag: "ProjectNotFound" as const, id }))
       )
-    };
-  })
+    )
+  )
 )
 ```
 
@@ -680,48 +686,55 @@ export class WebSocketService extends Context.Tag("WebSocketService")<
   WebSocketService
 >() {}
 
-const makeWebSocketService = Effect.gen(function* () {
-  const queue = yield* Queue.unbounded<WebSocketMessage>()
-  
-  // Connect WebSocket
-  const ws = yield* Effect.sync(
-    () => new WebSocket(import.meta.env.VITE_WS_URL || "ws://localhost:3000/ws")
-  )
-  
-  // Wait for connection
-  yield* Effect.async<void>((resume) => {
-    ws.onopen = () => resume(Effect.void)
-    ws.onerror = () => resume(Effect.void)
-  })
-  
-  // Handle incoming messages
-  yield* Effect.sync(() => {
-    ws.onmessage = (event) => {
-      try {
-        const message = JSON.parse(event.data) as WebSocketMessage
-        Effect.runFork(Queue.offer(queue, message))
-      } catch (error) {
-        console.error("Failed to parse WebSocket message:", error)
-      }
-    }
-  })
-  
-  // Register cleanup
-  yield* Effect.addFinalizer(() =>
-    Effect.sync(() => {
-      ws.close()
-    })
-  )
+const makeWebSocketService = pipe(
+  Queue.unbounded<WebSocketMessage>(),
+  Effect.flatMap((queue) =>
+    pipe(
+      // Connect WebSocket
+      Effect.sync(
+        () => new WebSocket(import.meta.env.VITE_WS_URL || "ws://localhost:3000/ws")
+      ),
+      Effect.flatMap((ws) =>
+        pipe(
+          // Wait for connection
+          Effect.async<void>((resume) => {
+            ws.onopen = () => resume(Effect.void)
+            ws.onerror = () => resume(Effect.void)
+          }),
+          Effect.flatMap(() =>
+            // Handle incoming messages
+            Effect.sync(() => {
+              ws.onmessage = (event) => {
+                try {
+                  const message = JSON.parse(event.data) as WebSocketMessage
+                  Effect.runFork(Queue.offer(queue, message))
+                } catch (error) {
+                  console.error("Failed to parse WebSocket message:", error)
+                }
+              }
+            })
+          ),
+          Effect.flatMap(() =>
+            // Register cleanup
+            Effect.addFinalizer(() =>
+              Effect.sync(() => {
+                ws.close()
+              })
+            )
+          ),
+          Effect.map(() => ({
+            messages: Stream.fromQueue(queue),
 
-  return {
-    messages: Stream.fromQueue(queue),
-
-    send: (message) =>
-      Effect.sync(() => {
-        ws.send(JSON.stringify(message))
-      })
-  }
-})
+            send: (message) =>
+              Effect.sync(() => {
+                ws.send(JSON.stringify(message))
+              })
+          }))
+        )
+      )
+    )
+  )
+)
 
 export const WebSocketServiceLive = Layer.scoped(
   WebSocketService,
@@ -856,13 +869,12 @@ export function createRefreshableEffect<A, E>(
   $effect(() => {
     loading = true
     error = null
-    
+
     Effect.runPromise(
-      Effect.gen(function* () {
-        const service = yield* TaskService
-        const loadedTasks = yield* service.listTasks(projectId)
-        return loadedTasks
-      }),
+      pipe(
+        TaskService,
+        Effect.flatMap((service) => service.listTasks(projectId))
+      ),
       { runtime: AppRuntime }
     )
       .then((loadedTasks) => {
@@ -878,13 +890,13 @@ export function createRefreshableEffect<A, E>(
   // Delete task
   async function handleDelete(id: string) {
     const result = await Effect.runPromiseExit(
-      Effect.gen(function* () {
-        const service = yield* TaskService
-        yield* service.deleteTask(id)
-      }),
+      pipe(
+        TaskService,
+        Effect.flatMap((service) => service.deleteTask(id))
+      ),
       { runtime: AppRuntime }
     )
-    
+
     if (result._tag === "Success") {
       tasks = tasks.filter((t) => t.id !== id)
     }
@@ -893,15 +905,15 @@ export function createRefreshableEffect<A, E>(
   // Toggle task status
   async function handleToggle(task: Task) {
     const newStatus = task.status === "done" ? "todo" : "done"
-    
+
     const result = await Effect.runPromiseExit(
-      Effect.gen(function* () {
-        const service = yield* TaskService
-        return yield* service.updateTask(task.id, { status: newStatus })
-      }),
+      pipe(
+        TaskService,
+        Effect.flatMap((service) => service.updateTask(task.id, { status: newStatus }))
+      ),
       { runtime: AppRuntime }
     )
-    
+
     if (result._tag === "Success") {
       tasks = tasks.map((t) => (t.id === task.id ? result.value : t))
     }
@@ -1172,15 +1184,15 @@ export function createRefreshableEffect<A, E>(
       priority,
       projectId
     }
-    
+
     const result = await Effect.runPromiseExit(
-      Effect.gen(function* () {
-        const service = yield* TaskService
-        return yield* service.createTask(input)
-      }),
+      pipe(
+        TaskService,
+        Effect.flatMap((service) => service.createTask(input))
+      ),
       { runtime: AppRuntime }
     )
-    
+
     if (result._tag === "Success") {
       // Reset form
       title = ""
@@ -1339,10 +1351,10 @@ export function createRefreshableEffect<A, E>(
   // Load projects
   $effect(() => {
     Effect.runPromise(
-      Effect.gen(function* () {
-        const service = yield* ProjectService
-        return yield* service.listProjects()
-      }),
+      pipe(
+        ProjectService,
+        Effect.flatMap((service) => service.listProjects())
+      ),
       { runtime: AppRuntime }
     ).then((loadedProjects) => {
       projects = loadedProjects

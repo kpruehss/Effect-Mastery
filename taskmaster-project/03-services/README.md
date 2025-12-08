@@ -45,12 +45,9 @@ class MyService extends Context.Tag("MyService")<
 // 3. Create Layer
 const MyServiceLive = Layer.effect(
   MyService,
-  Effect.gen(function* () {
-    // Setup and dependencies
-    return {
-      operation: () => Effect.succeed(result)
-    }
-  })
+  Effect.sync(() => ({
+    operation: () => Effect.succeed(result)
+  }))
 )
 ```
 
@@ -218,16 +215,16 @@ describe('TaskService', () => {
   )
 
   it('creates task with optimistic update', async () => {
-    const program = Effect.gen(function* () {
-      const service = yield* TaskService
-      const task = yield* service.createTask({
-        title: 'New Task',
-        priority: 'high',
-        projectId: 'project-123'
-      })
-
-      return task
-    })
+    const program = pipe(
+      TaskService,
+      Effect.flatMap(service =>
+        service.createTask({
+          title: 'New Task',
+          priority: 'high',
+          projectId: 'project-123'
+        })
+      )
+    )
 
     const result = await Effect.runPromise(
       program.pipe(Effect.provide(TestLayer))
@@ -266,14 +263,13 @@ interface MegaService {
 Refs provide reactive state management:
 
 ```typescript
-const makeService = Effect.gen(function* () {
-  const items = yield* Ref.make<Item[]>([])
-
-  return {
+const makeService = pipe(
+  Ref.make<Item[]>([]),
+  Effect.map(items => ({
     getItems: () => Ref.get(items),
     addItem: (item: Item) => Ref.update(items, prev => [...prev, item])
-  }
-})
+  }))
+)
 ```
 
 ### 3. Type Errors Properly
@@ -292,16 +288,14 @@ type ServiceError =
 Use `Layer.scoped` for resources needing cleanup:
 
 ```typescript
-const makeWebSocket = Effect.gen(function* () {
-  const ws = yield* Effect.sync(() => new WebSocket(url))
-
-  // Register cleanup
-  yield* Effect.addFinalizer(() =>
-    Effect.sync(() => ws.close())
+const makeWebSocket = pipe(
+  Effect.sync(() => new WebSocket(url)),
+  Effect.tap(ws =>
+    Effect.addFinalizer(() =>
+      Effect.sync(() => ws.close())
+    )
   )
-
-  return ws
-})
+)
 
 const WebSocketServiceLive = Layer.scoped(
   WebSocketService,
@@ -316,17 +310,15 @@ Services can depend on other services:
 ```typescript
 const TaskServiceLive = Layer.effect(
   TaskService,
-  Effect.gen(function* () {
-    const api = yield* ApiClient
-    const logger = yield* Logger
-
-    return {
+  pipe(
+    Effect.all([ApiClient, Logger]),
+    Effect.map(([api, logger]) => ({
       createTask: (input) => pipe(
         logger.log("Creating task"),
         Effect.flatMap(() => api.post("/tasks", input))
       )
-    }
-  })
+    }))
+  )
 )
 ```
 
@@ -364,12 +356,20 @@ const [users, posts] = yield* Effect.all([
 ### Pattern 4: Sequential with Dependencies
 
 ```typescript
-const workflow = Effect.gen(function* () {
-  const user = yield* getUser(userId)
-  const posts = yield* getUserPosts(user.id)
-  const comments = yield* getPostComments(posts[0].id)
-  return { user, posts, comments }
-})
+const workflow = pipe(
+  getUser(userId),
+  Effect.flatMap(user =>
+    pipe(
+      getUserPosts(user.id),
+      Effect.flatMap(posts =>
+        pipe(
+          getPostComments(posts[0].id),
+          Effect.map(comments => ({ user, posts, comments }))
+        )
+      )
+    )
+  )
+)
 ```
 
 ---

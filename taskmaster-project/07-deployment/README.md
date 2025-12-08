@@ -491,40 +491,46 @@ import { Effect } from 'effect'
 import { AppConfig } from '$lib/config'
 
 export const trackPageView = (path: string) =>
-  Effect.gen(function* (_) {
-    const config = yield* _(AppConfig)
+  pipe(
+    AppConfig,
+    Effect.flatMap((config) => {
+      if (!config.enableAnalytics) {
+        return Effect.void
+      }
 
-    if (!config.enableAnalytics) {
-      return
-    }
-
-    // Send to analytics service
-    if (typeof window !== 'undefined' && window.gtag) {
-      window.gtag('event', 'page_view', {
-        page_path: path
+      // Send to analytics service
+      return Effect.sync(() => {
+        if (typeof window !== 'undefined' && window.gtag) {
+          window.gtag('event', 'page_view', {
+            page_path: path
+          })
+        }
       })
-    }
-  })
+    })
+  )
 
 export const trackEvent = (
   category: string,
   action: string,
   label?: string
 ) =>
-  Effect.gen(function* (_) {
-    const config = yield* _(AppConfig)
+  pipe(
+    AppConfig,
+    Effect.flatMap((config) => {
+      if (!config.enableAnalytics) {
+        return Effect.void
+      }
 
-    if (!config.enableAnalytics) {
-      return
-    }
-
-    if (typeof window !== 'undefined' && window.gtag) {
-      window.gtag('event', action, {
-        event_category: category,
-        event_label: label
+      return Effect.sync(() => {
+        if (typeof window !== 'undefined' && window.gtag) {
+          window.gtag('event', action, {
+            event_category: category,
+            event_label: label
+          })
+        }
       })
-    }
-  })
+    })
+  )
 ```
 
 ### 3. Health Check Endpoint
@@ -665,7 +671,7 @@ import type { RequestEvent } from '@sveltejs/kit'
 const requestCounts = new Map<string, { count: number; resetAt: number }>()
 
 export const rateLimit = (event: RequestEvent, maxRequests = 100) =>
-  Effect.gen(function* (_) {
+  Effect.sync(() => {
     const ip = event.getClientAddress()
     const now = Date.now()
 

@@ -69,10 +69,10 @@ Create `src/routes/+page.svelte`:
   // Load projects
   $effect(() => {
     Effect.runPromise(
-      Effect.gen(function* () {
-        const service = yield* ProjectService
-        return yield* service.listProjects()
-      }),
+      pipe(
+        ProjectService,
+        Effect.flatMap((service) => service.listProjects())
+      ),
       { runtime: AppRuntime }
     ).then((loadedProjects) => {
       projects = loadedProjects
@@ -139,11 +139,10 @@ import type { PageLoad } from "./$types"
 
 export const load: PageLoad = async ({ params }) => {
   const result = await Effect.runPromiseExit(
-    Effect.gen(function* () {
-      const service = yield* TaskService
-      const task = yield* service.getTask(params.id)
-      return task
-    }),
+    pipe(
+      TaskService,
+      Effect.flatMap((service) => service.getTask(params.id))
+    ),
     { runtime: AppRuntime }
   )
 
@@ -202,14 +201,16 @@ export const actions = {
     const projectId = formData.get("projectId") as string
 
     const result = await Effect.runPromiseExit(
-      Effect.gen(function* () {
-        const service = yield* TaskService
-        return yield* service.createTask({
-          title,
-          priority,
-          projectId
-        })
-      }),
+      pipe(
+        TaskService,
+        Effect.flatMap((service) =>
+          service.createTask({
+            title,
+            priority,
+            projectId
+          })
+        )
+      ),
       { runtime: AppRuntime }
     )
 
@@ -228,12 +229,14 @@ export const actions = {
     const title = formData.get("title") as string | null
 
     const result = await Effect.runPromiseExit(
-      Effect.gen(function* () {
-        const service = yield* TaskService
-        return yield* service.updateTask(params.id, {
-          title: title || undefined
-        })
-      }),
+      pipe(
+        TaskService,
+        Effect.flatMap((service) =>
+          service.updateTask(params.id, {
+            title: title || undefined
+          })
+        )
+      ),
       { runtime: AppRuntime }
     )
 
@@ -291,10 +294,10 @@ export const GET: RequestHandler = async ({ url }) => {
   const projectId = url.searchParams.get("projectId")
 
   const result = await Effect.runPromiseExit(
-    Effect.gen(function* () {
-      const service = yield* TaskService
-      return yield* service.listTasks(projectId || undefined)
-    }),
+    pipe(
+      TaskService,
+      Effect.flatMap((service) => service.listTasks(projectId || undefined))
+    ),
     { runtime: AppRuntime }
   )
 
@@ -313,11 +316,15 @@ export const POST: RequestHandler = async ({ request }) => {
   const body = await request.json()
 
   const result = await Effect.runPromiseExit(
-    Effect.gen(function* () {
-      const service = yield* TaskService
-      const validated = yield* validateCreateTaskInput(body)
-      return yield* service.createTask(validated)
-    }),
+    pipe(
+      TaskService,
+      Effect.flatMap((service) =>
+        pipe(
+          validateCreateTaskInput(body),
+          Effect.flatMap((validated) => service.createTask(validated))
+        )
+      )
+    ),
     { runtime: AppRuntime }
   )
 
@@ -335,10 +342,10 @@ export const POST: RequestHandler = async ({ request }) => {
 // src/routes/api/tasks/[id]/+server.ts
 export const DELETE: RequestHandler = async ({ params }) => {
   const result = await Effect.runPromiseExit(
-    Effect.gen(function* () {
-      const service = yield* TaskService
-      return yield* service.deleteTask(params.id)
-    }),
+    pipe(
+      TaskService,
+      Effect.flatMap((service) => service.deleteTask(params.id))
+    ),
     { runtime: AppRuntime }
   )
 

@@ -191,10 +191,9 @@ A Runtime is a configured Effect execution environment:
 
   $effect(() => {
     Effect.runPromise(
-      Effect.gen(function* () {
-        const service = yield* TaskService
-        return yield* service.listTasks()
-      }),
+      TaskService.pipe(
+        Effect.flatMap((service) => service.listTasks())
+      ),
       { runtime: AppRuntime }
     ).then(loadedTasks => {
       tasks = loadedTasks
@@ -213,10 +212,9 @@ import { TaskService } from "$services/TaskService"
 
 export const load = async () => {
   const tasks = await Effect.runPromise(
-    Effect.gen(function* () {
-      const service = yield* TaskService
-      return yield* service.listTasks()
-    }),
+    TaskService.pipe(
+      Effect.flatMap((service) => service.listTasks())
+    ),
     { runtime: AppRuntime }
   )
 
@@ -235,10 +233,9 @@ import { TaskService } from "$services/TaskService"
 
 export const GET = async () => {
   const tasks = await Effect.runPromise(
-    Effect.gen(function* () {
-      const service = yield* TaskService
-      return yield* service.listTasks()
-    }),
+    TaskService.pipe(
+      Effect.flatMap((service) => service.listTasks())
+    ),
     { runtime: AppRuntime }
   )
 
@@ -310,18 +307,17 @@ import { TaskService } from "$services/TaskService"
 
 describe('Task workflow', () => {
   it('creates and lists tasks', async () => {
-    const program = Effect.gen(function* () {
-      const service = yield* TaskService
-
-      yield* service.createTask({
-        title: "Test Task",
-        priority: "high",
-        projectId: "test-project"
-      })
-
-      const tasks = yield* service.listTasks()
-      return tasks
-    })
+    const program = TaskService.pipe(
+      Effect.flatMap((service) =>
+        service.createTask({
+          title: "Test Task",
+          priority: "high",
+          projectId: "test-project"
+        }).pipe(
+          Effect.flatMap(() => service.listTasks())
+        )
+      )
+    )
 
     const tasks = await Effect.runPromise(
       program.pipe(Effect.provide(TestLayer))
@@ -344,11 +340,10 @@ Layers are memoized by default:
 // This service is built only once
 const ExpensiveServiceLive = Layer.effect(
   ExpensiveService,
-  Effect.gen(function* () {
-    console.log("Building service") // Runs once
-    yield* Effect.sleep("5 seconds")
-    return makeService()
-  })
+  Effect.sleep("5 seconds").pipe(
+    Effect.tap(() => Effect.sync(() => console.log("Building service"))), // Runs once
+    Effect.map(() => makeService())
+  )
 )
 ```
 
@@ -402,15 +397,15 @@ Before moving to Chapter 5, verify:
 
 ```typescript
 // ❌ Bad - circular dependency
-const ServiceA = Layer.effect(A, Effect.gen(function* () {
-  const b = yield* B  // Depends on B
-  return makeA(b)
-}))
+const ServiceA = Layer.effect(
+  A,
+  B.pipe(Effect.map((b) => makeA(b)))  // Depends on B
+)
 
-const ServiceB = Layer.effect(B, Effect.gen(function* () {
-  const a = yield* A  // Depends on A
-  return makeB(a)
-}))
+const ServiceB = Layer.effect(
+  B,
+  A.pipe(Effect.map((a) => makeB(a)))  // Depends on A
+)
 ```
 
 **Solution**: Refactor to remove cycle or introduce intermediary.

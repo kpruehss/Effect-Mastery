@@ -142,41 +142,40 @@ export const ApiClientLive = Layer.succeed(
 import { Effect } from "effect";
 import { ApiClient } from "$services/ApiClient";
 
-const fetchUsers = Effect.gen(function* () {
-  const api = yield* ApiClient;
-  const users = yield* api.get<User[]>("/users");
-  return users;
-});
+const fetchUsers = pipe(
+  ApiClient,
+  Effect.flatMap((api) => api.get<User[]>("/users"))
+);
 ```
 
 ### POST with Body
 
 ```typescript
 const createUser = (input: CreateUserInput) =>
-  Effect.gen(function* () {
-    const api = yield* ApiClient;
-    const user = yield* api.post<User, CreateUserInput>("/users", input);
-    return user;
-  });
+  pipe(
+    ApiClient,
+    Effect.flatMap((api) => api.post<User, CreateUserInput>("/users", input))
+  );
 ```
 
 ### Error Handling
 
 ```typescript
 const fetchUserSafe = (id: string) =>
-  Effect.gen(function* () {
-    const api = yield* ApiClient;
-
-    return yield* pipe(
-      api.get<User>(`/users/${id}`),
-      Effect.catchAll((error) => {
-        if (error._tag === "InvalidResponse" && error.status === 404) {
-          return Effect.succeed(null);
-        }
-        return Effect.fail(error);
-      }),
-    );
-  });
+  pipe(
+    ApiClient,
+    Effect.flatMap((api) =>
+      pipe(
+        api.get<User>(`/users/${id}`),
+        Effect.catchAll((error) => {
+          if (error._tag === "InvalidResponse" && error.status === 404) {
+            return Effect.succeed(null);
+          }
+          return Effect.fail(error);
+        })
+      )
+    )
+  );
 ```
 
 ---
@@ -251,10 +250,10 @@ describe("MyService", () => {
   const TestLayer = MyServiceLive.pipe(Layer.provide(TestApiClient));
 
   it("fetches data", async () => {
-    const program = Effect.gen(function* () {
-      const service = yield* MyService;
-      return yield* service.getData();
-    });
+    const program = pipe(
+      MyService,
+      Effect.flatMap((service) => service.getData())
+    );
 
     const result = await Effect.runPromise(program.pipe(Effect.provide(TestLayer)));
 
@@ -285,16 +284,16 @@ const fetchWithRetry = pipe(
 const cache = new Map();
 
 const fetchCached = (url: string) =>
-  Effect.gen(function* () {
-    if (cache.has(url)) {
-      return cache.get(url);
-    }
-
-    const api = yield* ApiClient;
-    const data = yield* api.get(url);
-    cache.set(url, data);
-    return data;
-  });
+  cache.has(url)
+    ? Effect.succeed(cache.get(url))
+    : pipe(
+        ApiClient,
+        Effect.flatMap((api) => api.get(url)),
+        Effect.map((data) => {
+          cache.set(url, data);
+          return data;
+        })
+      );
 ```
 
 ### Request Queue
@@ -302,16 +301,18 @@ const fetchCached = (url: string) =>
 ```typescript
 import { Queue } from "effect";
 
-const makeQueuedClient = Effect.gen(function* () {
-  const queue = yield* Queue.bounded<Request>(10);
-
-  // Process queue in background
-  yield* Effect.forkDaemon(Stream.fromQueue(queue).pipe(Stream.mapEffect((req) => processRequest(req))));
-
-  return {
-    enqueue: (req: Request) => Queue.offer(queue, req),
-  };
-});
+const makeQueuedClient = pipe(
+  Queue.bounded<Request>(10),
+  Effect.flatMap((queue) =>
+    pipe(
+      Stream.fromQueue(queue).pipe(Stream.mapEffect((req) => processRequest(req))),
+      Effect.forkDaemon,
+      Effect.map(() => ({
+        enqueue: (req: Request) => Queue.offer(queue, req),
+      }))
+    )
+  )
+);
 ```
 
 ---

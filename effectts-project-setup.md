@@ -751,23 +751,25 @@ export interface UserService {
 
 export class UserService extends Context.Tag("UserService")<UserService, UserService>() {}
 
-export const UserServiceLive = Layer.effect(UserService, Effect.gen(function* () {
-  const api = yield* ApiClient
+export const UserServiceLive = Layer.effect(
+  UserService,
+  pipe(
+    ApiClient,
+    Effect.map((api) => ({
+      getUser: (id) =>
+        pipe(
+          api.get<User>(`/users/${id}`),
+          Effect.mapError(() => ({ _tag: "UserNotFound" as const, id }))
+        ),
 
-  return {
-    getUser: (id) =>
-      pipe(
-        api.get<User>(`/users/${id}`),
-        Effect.mapError(() => ({ _tag: "UserNotFound" as const, id }))
-      ),
-
-    listUsers: () =>
-      pipe(
-        api.get<User[]>("/users"),
-        Effect.mapError(() => ({ _tag: "UserNotFound" as const, id: "all" }))
-      )
-  }
-}))
+      listUsers: () =>
+        pipe(
+          api.get<User[]>("/users"),
+          Effect.mapError(() => ({ _tag: "UserNotFound" as const, id: "all" }))
+        )
+    }))
+  )
+)
 ```
 
 ---
@@ -805,15 +807,22 @@ interface AuthService {
 }
 
 // Compose in application logic
-const authorizedFetch = Effect.gen(function* () {
-  const auth = yield* AuthService
-  const users = yield* UserService
-  
-  const canView = yield* auth.checkPermission("view:users")
-  if (!canView) return yield* Effect.fail({ _tag: "Unauthorized" })
-  
-  return yield* users.getUser(id)
-})
+const authorizedFetch = pipe(
+  AuthService,
+  Effect.flatMap((auth) =>
+    pipe(
+      auth.checkPermission("view:users"),
+      Effect.flatMap((canView) =>
+        canView
+          ? pipe(
+              UserService,
+              Effect.flatMap((users) => users.getUser(id))
+            )
+          : Effect.fail({ _tag: "Unauthorized" })
+      )
+    )
+  )
+)
 ```
 
 ### 3. Testing Strategy

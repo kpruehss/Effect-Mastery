@@ -284,14 +284,8 @@ const Logger = Context.GenericTag<Logger>("Logger")
 ### Use Service
 
 ```typescript
-// Generator style
-const program = Effect.gen(function* () {
-  const logger = yield* Logger
-  yield* logger.log("Hello")
-})
-
 // Pipe style
-const program2 = pipe(
+const program = pipe(
   Logger,
   Effect.flatMap(logger => logger.log("Hello"))
 )
@@ -322,10 +316,10 @@ const LoggerLive = Layer.succeed(Logger, {
 // Layer with dependencies
 const ApiClientLive = Layer.effect(
   ApiClient,
-  Effect.gen(function* () {
-    const config = yield* Config
-    return makeApiClient(config)
-  })
+  pipe(
+    Config,
+    Effect.map(config => makeApiClient(config))
+  )
 )
 ```
 
@@ -516,14 +510,18 @@ const result = pipe(
 )
 ```
 
-### Generator Pattern
+### Pipe Pattern
 
 ```typescript
-const program = Effect.gen(function* () {
-  const a = yield* effect1
-  const b = yield* effect2
-  return combine(a, b)
-})
+const program = pipe(
+  effect1,
+  Effect.flatMap(a =>
+    pipe(
+      effect2,
+      Effect.map(b => combine(a, b))
+    )
+  )
+)
 ```
 
 ### Conditional Logic
@@ -619,13 +617,16 @@ const test = pipe(
 )
 ```
 
-### Test with Generator
+### Test with Pipe
 
 ```typescript
-const test = Effect.gen(function* () {
-  const result = yield* effectUnderTest
-  expect(result).toEqual(expected)
-})
+const test = pipe(
+  effectUnderTest,
+  Effect.map(result => {
+    expect(result).toEqual(expected)
+    return result
+  })
+)
 
 Effect.runPromise(test)
 ```

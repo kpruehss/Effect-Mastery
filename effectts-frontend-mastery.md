@@ -448,11 +448,15 @@ class Logger extends Context.Tag("Logger")<Logger, Logger>() {}
 
 // Use the service
 const greetUser = (name: string) =>
-  Effect.gen(function* () {
-    const logger = yield* Logger
-    yield* logger.log(`Hello, ${name}!`)
-    return `Greeted ${name}`
-  })
+  pipe(
+    Logger,
+    Effect.flatMap(logger =>
+      pipe(
+        logger.log(`Hello, ${name}!`),
+        Effect.map(() => `Greeted ${name}`)
+      )
+    )
+  )
 
 // Alternative with pipe
 const greetUserPipe = (name: string) =>
@@ -504,9 +508,9 @@ class AppConfig extends Context.Tag("AppConfig")<AppConfig, AppConfig>() {}
 // Create a Layer (wires up dependencies)
 const ApiClientLive = Layer.effect(
   ApiClient,
-  Effect.gen(function* () {
-    const config = yield* AppConfig
-    return {
+  pipe(
+    AppConfig,
+    Effect.map(config => ({
       get: <T>(url: string) =>
         Effect.tryPromise({
           try: async () => {
@@ -551,16 +555,18 @@ const ApiClientLive = Layer.effect(
               ? { _tag: "InvalidResponse" as const, status: error.status as number }
               : { _tag: "NetworkError" as const, cause: error }
         })
-    }
-  })
+    }))
+  )
 )
 
 // Usage in application code
 const fetchUser = (id: string) =>
-  Effect.gen(function* () {
-    const api = yield* ApiClient
-    return yield* api.get<User>(`/users/${id}`)
-  })
+  pipe(
+    ApiClient,
+    Effect.flatMap(api =>
+      api.get<User>(`/users/${id}`)
+    )
+  )
 
 // Provide all dependencies
 const ConfigLive = Layer.succeed(AppConfig, {
@@ -627,10 +633,9 @@ interface UserCache {
 
 class UserCache extends Context.Tag("UserCache")<UserCache, UserCache>() {}
 
-const UserCacheLive = Layer.effect(UserCache, Effect.gen(function* () {
-  const cache = yield* Ref.make<Map<string, User>>(new Map())
-
-  return {
+const UserCacheLive = Layer.effect(UserCache, pipe(
+  Ref.make<Map<string, User>>(new Map()),
+  Effect.map(cache => ({
     get: (id) =>
       pipe(
         Ref.get(cache),
@@ -639,8 +644,8 @@ const UserCacheLive = Layer.effect(UserCache, Effect.gen(function* () {
 
     set: (id, user) =>
       Ref.update(cache, map => new Map(map).set(id, user))
-  }
-}))
+  }))
+))
 
 // Service that depends on other services
 interface UserRepository {
@@ -651,11 +656,9 @@ class UserRepository extends Context.Tag("UserRepository")<UserRepository, UserR
 
 const UserRepositoryLive = Layer.effect(
   UserRepository,
-  Effect.gen(function* () {
-    const api = yield* ApiClient
-    const cache = yield* UserCache
-
-    return {
+  pipe(
+    Effect.all([ApiClient, UserCache]),
+    Effect.map(([api, cache]) => ({
       fetchUser: (id) =>
         pipe(
           cache.get(id),
@@ -672,8 +675,8 @@ const UserRepositoryLive = Layer.effect(
             onSome: (user) => Effect.succeed(user)
           }))
         )
-    }
-  })
+    }))
+  )
 ).pipe(
   Layer.provide(ApiClientLive),
   Layer.provide(UserCacheLive)
@@ -1293,20 +1296,23 @@ const queryDatabase = (sql: string) =>
   )
 
 // Scope for multiple resources
-const withResources = Effect.gen(function* () {
-  const db = yield* Effect.acquireRelease(
+const withResources = pipe(
+  Effect.acquireRelease(
     openDatabase(),
     (db) => Effect.sync(() => db.close())
+  ),
+  Effect.flatMap(db =>
+    pipe(
+      Effect.acquireRelease(
+        openCache(),
+        (cache) => Effect.sync(() => cache.disconnect())
+      ),
+      Effect.flatMap(cache =>
+        performWork(db, cache)
+      )
+    )
   )
-  
-  const cache = yield* Effect.acquireRelease(
-    openCache(),
-    (cache) => Effect.sync(() => cache.disconnect())
-  )
-  
-  // Use both resources
-  yield* performWork(db, cache)
-})
+)
 ```
 
 ### 6.2 Streaming and Chunking
@@ -1350,20 +1356,20 @@ const processWithBackpressure = pipe(
 import { Effect, Cache, Duration } from "effect"
 
 // Simple cache
-const makeUserCache = Effect.gen(function* () {
-  return yield* Cache.make({
-    capacity: 100,
-    timeToLive: Duration.minutes(5),
-    lookup: (userId: string) => fetchUser(userId)
-  })
+const makeUserCache = Cache.make({
+  capacity: 100,
+  timeToLive: Duration.minutes(5),
+  lookup: (userId: string) => fetchUser(userId)
 })
 
 // Use cache
 const getUserWithCache = (userId: string) =>
-  Effect.gen(function* () {
-    const cache = yield* UserCacheService
-    return yield* Cache.get(cache, userId)
-  })
+  pipe(
+    UserCacheService,
+    Effect.flatMap(cache =>
+      Cache.get(cache, userId)
+    )
+  )
 
 // Stale-while-revalidate
 const staleWhileRevalidate = <A, E>(
@@ -1393,62 +1399,65 @@ interface TodosService {
   readonly deleteTodo: (id: string) => Effect.Effect<void, DeleteTodoError>
 }
 
-const makeTodosService = Effect.gen(function* () {
-  const todos = yield* Ref.make<Todo[]>([])
-  const api = yield* ApiClient
-  
-  return {
-    todos,
-    
-    addTodo: (text: string) => {
-      const optimisticTodo: Todo = {
-        id: `temp-${Date.now()}`,
-        text,
-        completed: false,
-        _optimistic: true
-      }
-      
-      return pipe(
-        // Add optimistically
-        Ref.update(todos, ts => [...ts, optimisticTodo]),
-        Effect.flatMap(() =>
-          api.post<Todo>("/todos", { text })
-        ),
-        Effect.tap(savedTodo =>
-          // Replace optimistic with real
-          Ref.update(todos, ts =>
-            ts.map(t => t.id === optimisticTodo.id ? savedTodo : t)
-          )
-        ),
-        Effect.tapError(() =>
-          // Rollback on error
-          Ref.update(todos, ts =>
-            ts.filter(t => t.id !== optimisticTodo.id)
-          )
-        )
-      )
-    },
-    
-    deleteTodo: (id: string) =>
-      pipe(
-        // Find and remove optimistically
-        Ref.get(todos),
-        Effect.flatMap(ts => {
-          const todo = ts.find(t => t.id === id)
-          if (!todo) return Effect.fail({ _tag: "NotFound" as const })
-          
+const makeTodosService = pipe(
+  Ref.make<Todo[]>([]),
+  Effect.flatMap(todos =>
+    pipe(
+      ApiClient,
+      Effect.map(api => ({
+        todos,
+
+        addTodo: (text: string) => {
+          const optimisticTodo: Todo = {
+            id: `temp-${Date.now()}`,
+            text,
+            completed: false,
+            _optimistic: true
+          }
+
           return pipe(
-            Ref.update(todos, ts => ts.filter(t => t.id !== id)),
-            Effect.flatMap(() => api.post("/todos/delete", { id })),
+            // Add optimistically
+            Ref.update(todos, ts => [...ts, optimisticTodo]),
+            Effect.flatMap(() =>
+              api.post<Todo>("/todos", { text })
+            ),
+            Effect.tap(savedTodo =>
+              // Replace optimistic with real
+              Ref.update(todos, ts =>
+                ts.map(t => t.id === optimisticTodo.id ? savedTodo : t)
+              )
+            ),
             Effect.tapError(() =>
               // Rollback on error
-              Ref.update(todos, ts => [...ts, todo])
+              Ref.update(todos, ts =>
+                ts.filter(t => t.id !== optimisticTodo.id)
+              )
             )
           )
-        })
-      )
-  }
-})
+        },
+
+        deleteTodo: (id: string) =>
+          pipe(
+            // Find and remove optimistically
+            Ref.get(todos),
+            Effect.flatMap(ts => {
+              const todo = ts.find(t => t.id === id)
+              if (!todo) return Effect.fail({ _tag: "NotFound" as const })
+
+              return pipe(
+                Ref.update(todos, ts => ts.filter(t => t.id !== id)),
+                Effect.flatMap(() => api.post("/todos/delete", { id })),
+                Effect.tapError(() =>
+                  // Rollback on error
+                  Ref.update(todos, ts => [...ts, todo])
+                )
+              )
+            })
+          )
+      }))
+    )
+  )
+)
 ```
 
 ### 6.5 Feature Flags Service
@@ -1470,57 +1479,63 @@ type FlagConfig = Record<string, {
   rollout?: number // 0-100 percentage
 }>
 
-const FeatureFlagsLive = Layer.effect(FeatureFlags, Effect.gen(function* () {
-  const api = yield* ApiClient
-  const flags = yield* Ref.make<FlagConfig>({})
+const FeatureFlagsLive = Layer.effect(FeatureFlags, pipe(
+  ApiClient,
+  Effect.flatMap(api =>
+    pipe(
+      Ref.make<FlagConfig>({}),
+      Effect.flatMap(flags => {
+        const fetchFlags = pipe(
+          api.get<FlagConfig>("/api/flags"),
+          Effect.flatMap(config => Ref.set(flags, config))
+        )
 
-  const fetchFlags = pipe(
-    api.get<FlagConfig>("/api/flags"),
-    Effect.flatMap(config => Ref.set(flags, config))
-  )
-
-  // Initial fetch
-  yield* fetchFlags
-
-  const getUserBucket = (userId: string, flag: string): number => {
-    // Consistent hashing for A/B testing
-    let hash = 0
-    const str = `${userId}-${flag}`
-    for (let i = 0; i < str.length; i++) {
-      hash = ((hash << 5) - hash) + str.charCodeAt(i)
-      hash = hash & hash
-    }
-    return Math.abs(hash) % 100
-  }
-
-  return {
-    isEnabled: (flag) =>
-      pipe(
-        Ref.get(flags),
-        Effect.map(config => {
-          const flagConfig = config[flag]
-          if (!flagConfig) return false
-          if (!flagConfig.enabled) return false
-
-          if (flagConfig.rollout !== undefined) {
-            // Get user from context if available
-            const bucket = getUserBucket("default", flag)
-            return bucket < flagConfig.rollout
+        const getUserBucket = (userId: string, flag: string): number => {
+          // Consistent hashing for A/B testing
+          let hash = 0
+          const str = `${userId}-${flag}`
+          for (let i = 0; i < str.length; i++) {
+            hash = ((hash << 5) - hash) + str.charCodeAt(i)
+            hash = hash & hash
           }
+          return Math.abs(hash) % 100
+        }
 
-          return true
-        })
-      ),
+        // Initial fetch
+        return pipe(
+          fetchFlags,
+          Effect.map(() => ({
+            isEnabled: (flag: string) =>
+              pipe(
+                Ref.get(flags),
+                Effect.map(config => {
+                  const flagConfig = config[flag]
+                  if (!flagConfig) return false
+                  if (!flagConfig.enabled) return false
 
-    getVariant: (flag) =>
-      pipe(
-        Ref.get(flags),
-        Effect.map(config => config[flag]?.variant ?? null)
-      ),
+                  if (flagConfig.rollout !== undefined) {
+                    // Get user from context if available
+                    const bucket = getUserBucket("default", flag)
+                    return bucket < flagConfig.rollout
+                  }
 
-    refresh: fetchFlags
-  }
-}))
+                  return true
+                })
+              ),
+
+            getVariant: (flag: string) =>
+              pipe(
+                Ref.get(flags),
+                Effect.map(config => config[flag]?.variant ?? null)
+              ),
+
+            refresh: fetchFlags
+          }))
+        )
+      })
+    )
+  )
+))
 
 // Usage in components
 const ConditionalFeature = () => {
@@ -1638,10 +1653,9 @@ type RepositoryError =
 
 export const UserRepositoryLive = Layer.effect(
   UserRepository,
-  Effect.gen(function* () {
-    const api = yield* ApiClient
-
-    return {
+  pipe(
+    ApiClient,
+    Effect.map(api => ({
       listUsers: () =>
         pipe(
           api.get<unknown[]>("/users"),
@@ -1654,7 +1668,7 @@ export const UserRepositoryLive = Layer.effect(
           }))
         ),
 
-      getUser: (id) =>
+      getUser: (id: string) =>
         pipe(
           api.get<unknown>(`/users/${id}`),
           Effect.flatMap(validateUser),
@@ -1665,7 +1679,7 @@ export const UserRepositoryLive = Layer.effect(
           )
         ),
 
-      createUser: (data) =>
+      createUser: (data: CreateUserData) =>
         pipe(
           api.post<unknown>("/users", data),
           Effect.flatMap(validateUser),
@@ -1675,7 +1689,7 @@ export const UserRepositoryLive = Layer.effect(
           }))
         ),
 
-      updateUser: (id, data) =>
+      updateUser: (id: string, data: Partial<User>) =>
         pipe(
           api.post<unknown>(`/users/${id}`, data),
           Effect.flatMap(validateUser),
@@ -1685,7 +1699,7 @@ export const UserRepositoryLive = Layer.effect(
           }))
         ),
 
-      deleteUser: (id) =>
+      deleteUser: (id: string) =>
         pipe(
           api.post("/users/delete", { id }),
           Effect.asVoid,
@@ -1694,8 +1708,8 @@ export const UserRepositoryLive = Layer.effect(
             cause: error
           }))
         )
-    }
-  })
+    }))
+  )
 )
 ```
 
@@ -1715,27 +1729,28 @@ type StreamError = { _tag: "StreamError"; cause: unknown }
 
 export const ActivityStreamLive = Layer.effect(
   ActivityStream,
-  Effect.gen(function* () {
-    const api = yield* ApiClient
-
-    // Poll for new activities
-    const pollActivities = pipe(
-      api.get<unknown[]>("/activities/recent"),
-      Effect.flatMap(data =>
-        Effect.all(data.map(validateActivity), { concurrency: "unbounded" })
-      ),
-      Effect.retry(Schedule.exponential("1 second")),
-      Effect.mapError(cause => ({ _tag: "StreamError" as const, cause }))
-    )
-
-    return {
-      stream: pipe(
-        Stream.repeatEffect(pollActivities),
-        Stream.flatMap(activities => Stream.fromIterable(activities)),
-        Stream.schedule(Schedule.fixed("5 seconds"))
+  pipe(
+    ApiClient,
+    Effect.map(api => {
+      // Poll for new activities
+      const pollActivities = pipe(
+        api.get<unknown[]>("/activities/recent"),
+        Effect.flatMap(data =>
+          Effect.all(data.map(validateActivity), { concurrency: "unbounded" })
+        ),
+        Effect.retry(Schedule.exponential("1 second")),
+        Effect.mapError(cause => ({ _tag: "StreamError" as const, cause }))
       )
-    }
-  })
+
+      return {
+        stream: pipe(
+          Stream.repeatEffect(pollActivities),
+          Stream.flatMap(activities => Stream.fromIterable(activities)),
+          Stream.schedule(Schedule.fixed("5 seconds"))
+        )
+      }
+    })
+  )
 )
 ```
 
@@ -1926,45 +1941,46 @@ export class ExportService extends Context.Tag("ExportService")<ExportService, E
 
 type ExportError = { _tag: "ExportFailed"; cause: unknown }
 
-export const ExportServiceLive = Layer.effect(ExportService, Effect.gen(function* () {
-  const userRepo = yield* UserRepository
+export const ExportServiceLive = Layer.effect(ExportService, pipe(
+  UserRepository,
+  Effect.map(userRepo => {
+    const toCSV = (data: unknown[]): string => {
+      if (data.length === 0) return ""
 
-  const toCSV = (data: unknown[]): string => {
-    if (data.length === 0) return ""
-
-    const headers = Object.keys(data[0] as object)
-    const rows = data.map(row =>
-      headers.map(h => JSON.stringify((row as any)[h])).join(",")
-    )
-
-    return [headers.join(","), ...rows].join("\n")
-  }
-
-  return {
-    exportUsers: (format) =>
-      pipe(
-        userRepo.listUsers(),
-        Effect.map(users =>
-          format === "csv"
-            ? new Blob([toCSV(users)], { type: "text/csv" })
-            : new Blob([JSON.stringify(users, null, 2)], { type: "application/json" })
-        ),
-        Effect.mapError(cause => ({ _tag: "ExportFailed" as const, cause }))
-      ),
-
-    exportActivities: (startDate, endDate) =>
-      pipe(
-        // Fetch activities in date range
-        api.get<unknown[]>(
-          `/activities?start=${startDate.toISOString()}&end=${endDate.toISOString()}`
-        ),
-        Effect.map(data =>
-          new Blob([JSON.stringify(data, null, 2)], { type: "application/json" })
-        ),
-        Effect.mapError(cause => ({ _tag: "ExportFailed" as const, cause }))
+      const headers = Object.keys(data[0] as object)
+      const rows = data.map(row =>
+        headers.map(h => JSON.stringify((row as any)[h])).join(",")
       )
-  }
-}))
+
+      return [headers.join(","), ...rows].join("\n")
+    }
+
+    return {
+      exportUsers: (format: "csv" | "json") =>
+        pipe(
+          userRepo.listUsers(),
+          Effect.map(users =>
+            format === "csv"
+              ? new Blob([toCSV(users)], { type: "text/csv" })
+              : new Blob([JSON.stringify(users, null, 2)], { type: "application/json" })
+          ),
+          Effect.mapError(cause => ({ _tag: "ExportFailed" as const, cause }))
+        ),
+
+      exportActivities: (startDate: Date, endDate: Date) =>
+        pipe(
+          // Fetch activities in date range
+          api.get<unknown[]>(
+            `/activities?start=${startDate.toISOString()}&end=${endDate.toISOString()}`
+          ),
+          Effect.map(data =>
+            new Blob([JSON.stringify(data, null, 2)], { type: "application/json" })
+          ),
+          Effect.mapError(cause => ({ _tag: "ExportFailed" as const, cause }))
+        )
+    }
+  })
+))
 ```
 
 ### 7.8 Complete Layer Composition
@@ -2186,23 +2202,21 @@ const users = Effect.all([
 import { Effect, Cache, Duration } from "effect"
 
 // Memoize expensive computations
-const makeAnalyticsCache = Effect.gen(function* () {
-  return yield* Cache.make({
-    capacity: 50,
-    timeToLive: Duration.minutes(15),
-    lookup: (dateRange: string) =>
-      pipe(
-        fetchAnalytics(dateRange),
-        Effect.tap(() => Console.log(`Computing analytics for ${dateRange}`))
-      )
-  })
+const makeAnalyticsCache = Cache.make({
+  capacity: 50,
+  timeToLive: Duration.minutes(15),
+  lookup: (dateRange: string) =>
+    pipe(
+      fetchAnalytics(dateRange),
+      Effect.tap(() => Console.log(`Computing analytics for ${dateRange}`))
+    )
 })
 
 const getAnalytics = (dateRange: string) =>
-  Effect.gen(function* () {
-    const cache = yield* AnalyticsCache
-    return yield* Cache.get(cache, dateRange)
-  })
+  pipe(
+    AnalyticsCache,
+    Effect.flatMap(cache => Cache.get(cache, dateRange))
+  )
 ```
 
 ### 9.3 Lazy Loading
@@ -2306,18 +2320,19 @@ interface AuthService {
 
 // 2. Compose services for complex operations
 const authorizedUserFetch = (userId: string) =>
-  Effect.gen(function* () {
-    const auth = yield* AuthService
-    const users = yield* UserService
-    
-    const canView = yield* auth.checkPermission(currentUserId, "view:users")
-    
-    if (!canView) {
-      return yield* Effect.fail({ _tag: "Unauthorized" as const })
-    }
-    
-    return yield* users.getUser(userId)
-  })
+  pipe(
+    Effect.all([AuthService, UserService]),
+    Effect.flatMap(([auth, users]) =>
+      pipe(
+        auth.checkPermission(currentUserId, "view:users"),
+        Effect.flatMap(canView =>
+          canView
+            ? users.getUser(userId)
+            : Effect.fail({ _tag: "Unauthorized" as const })
+        )
+      )
+    )
+  )
 
 // 3. Use layers for dependency management
 const AppLayer = Layer.mergeAll(

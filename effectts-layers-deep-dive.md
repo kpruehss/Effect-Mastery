@@ -62,34 +62,32 @@ const LoggerLive = Layer.succeed(
 // 2. Layer.effect - For services that need setup (Effect)
 const LoggerWithSetup = Layer.effect(
   Logger,
-  Effect.gen(function* () {
-    // Perform setup
-    yield* Effect.sync(() => console.log("Logger initialized"))
-
-    return {
+  pipe(
+    Effect.sync(() => console.log("Logger initialized")),
+    Effect.map(() => ({
       log: (message) => Console.log(`[LOG] ${message}`)
-    }
-  })
+    }))
+  )
 )
 // Type: Layer<Logger, never, never>
 
 // 3. Layer.scoped - For services that need cleanup
 const LoggerWithCleanup = Layer.scoped(
   Logger,
-  Effect.gen(function* () {
-    // Setup
-    const logFile = yield* Effect.sync(() => openLogFile())
-
-    // Register cleanup
-    yield* Effect.addFinalizer(() =>
-      Effect.sync(() => logFile.close())
+  pipe(
+    Effect.sync(() => openLogFile()),
+    Effect.flatMap(logFile =>
+      pipe(
+        Effect.addFinalizer(() =>
+          Effect.sync(() => logFile.close())
+        ),
+        Effect.map(() => ({
+          log: (message) =>
+            Effect.sync(() => logFile.write(message))
+        }))
+      )
     )
-
-    return {
-      log: (message) =>
-        Effect.sync(() => logFile.write(message))
-    }
-  })
+  )
 )
 // Type: Layer<Logger, never, Scope>
 ```
@@ -121,18 +119,17 @@ const ConfigLive = Layer.succeed(Config, makeConfig())
 // Or with validation
 const ConfigLiveValidated = Layer.effect(
   Config,
-  Effect.gen(function* () {
-    const apiUrl = process.env.API_URL
-
-    if (!apiUrl) {
-      return yield* Effect.fail({ _tag: "MissingConfig" as const, key: "API_URL" })
-    }
-
-    return {
-      apiUrl,
-      timeout: parseInt(process.env.TIMEOUT || "5000", 10)
-    }
-  })
+  pipe(
+    Effect.sync(() => process.env.API_URL),
+    Effect.flatMap(apiUrl =>
+      !apiUrl
+        ? Effect.fail({ _tag: "MissingConfig" as const, key: "API_URL" })
+        : Effect.succeed({
+            apiUrl,
+            timeout: parseInt(process.env.TIMEOUT || "5000", 10)
+          })
+    )
+  )
 )
 ```
 
@@ -154,32 +151,37 @@ class Logger extends Context.Tag("Logger")<Logger, Logger>() {}
 // Database depends on Config and Logger
 const DatabaseLive = Layer.effect(
   Database,
-  Effect.gen(function* () {
-    const config = yield* Config
-    const logger = yield* Logger
-
-    // Setup connection
-    yield* logger.log(`Connecting to database at ${config.apiUrl}`)
-    const connection = yield* Effect.tryPromise({
-      try: () => createConnection(config.apiUrl),
-      catch: (error) => ({ _tag: "ConnectionFailed" as const, error })
-    })
-
-    yield* logger.log("Database connected")
-
-    return {
-      query: <T>(sql: string) =>
-        pipe(
-          logger.log(`Executing query: ${sql}`),
-          Effect.flatMap(() =>
-            Effect.tryPromise({
-              try: () => connection.execute<T>(sql),
-              catch: (error) => ({ _tag: "QueryFailed" as const, error })
-            })
+  pipe(
+    Effect.all([Config, Logger]),
+    Effect.flatMap(([config, logger]) =>
+      pipe(
+        logger.log(`Connecting to database at ${config.apiUrl}`),
+        Effect.flatMap(() =>
+          Effect.tryPromise({
+            try: () => createConnection(config.apiUrl),
+            catch: (error) => ({ _tag: "ConnectionFailed" as const, error })
+          })
+        ),
+        Effect.flatMap(connection =>
+          pipe(
+            logger.log("Database connected"),
+            Effect.map(() => ({
+              query: <T>(sql: string) =>
+                pipe(
+                  logger.log(`Executing query: ${sql}`),
+                  Effect.flatMap(() =>
+                    Effect.tryPromise({
+                      try: () => connection.execute<T>(sql),
+                      catch: (error) => ({ _tag: "QueryFailed" as const, error })
+                    })
+                  )
+                )
+            }))
           )
         )
-    }
-  })
+      )
+    )
+  )
 )
 // Type: Layer<Database, ConnectionFailed, Config | Logger>
 ```
@@ -197,11 +199,9 @@ class Cache extends Context.Tag("Cache")<Cache, Cache>() {}
 
 const CacheLive = Layer.effect(
   Cache,
-  Effect.gen(function* () {
-    // Create mutable state
-    const store = yield* Ref.make<Map<string, unknown>>(new Map())
-
-    return {
+  pipe(
+    Ref.make<Map<string, unknown>>(new Map()),
+    Effect.map(store => ({
       get: <T>(key: string) =>
         pipe(
           Ref.get(store),
@@ -213,8 +213,8 @@ const CacheLive = Layer.effect(
 
       clear: () =>
         Ref.set(store, new Map())
-    }
-  })
+    }))
+  )
 )
 ```
 
@@ -234,43 +234,50 @@ class WebSocketConnection extends Context.Tag("WebSocketConnection")<
 
 const WebSocketConnectionLive = Layer.scoped(
   WebSocketConnection,
-  Effect.gen(function* () {
-    const config = yield* Config
-    const logger = yield* Logger
+  pipe(
+    Effect.all([Config, Logger]),
+    Effect.flatMap(([config, logger]) =>
+      pipe(
+        logger.log("Opening WebSocket connection"),
+        Effect.flatMap(() =>
+          Effect.sync(() => new WebSocket(config.wsUrl))
+        ),
+        Effect.flatMap(ws =>
+          pipe(
+            Effect.async<void, never>((resume) => {
+              ws.onopen = () => resume(Effect.void)
+              ws.onerror = () => resume(Effect.void)
+            }),
+            Effect.flatMap(() =>
+              logger.log("WebSocket connected")
+            ),
+            Effect.flatMap(() =>
+              Effect.addFinalizer(() =>
+                pipe(
+                  logger.log("Closing WebSocket connection"),
+                  Effect.flatMap(() =>
+                    Effect.sync(() => ws.close())
+                  )
+                )
+              )
+            ),
+            Effect.map(() => ({
+              send: (message) =>
+                Effect.sync(() => ws.send(message)),
 
-    // Acquire resource
-    yield* logger.log("Opening WebSocket connection")
-    const ws = yield* Effect.sync(() => new WebSocket(config.wsUrl))
+              receive: () =>
+                Effect.async<string>((resume) => {
+                  ws.onmessage = (event) => resume(Effect.succeed(event.data))
+                }),
 
-    // Wait for connection
-    yield* Effect.async<void, never>((resume) => {
-      ws.onopen = () => resume(Effect.void)
-      ws.onerror = () => resume(Effect.void)
-    })
-
-    yield* logger.log("WebSocket connected")
-
-    // Register cleanup (runs automatically when scope closes)
-    yield* Effect.addFinalizer(() =>
-      Effect.gen(function* () {
-        yield* logger.log("Closing WebSocket connection")
-        yield* Effect.sync(() => ws.close())
-      })
+              close: () =>
+                Effect.sync(() => ws.close())
+            }))
+          )
+        )
+      )
     )
-
-    return {
-      send: (message) =>
-        Effect.sync(() => ws.send(message)),
-
-      receive: () =>
-        Effect.async<string>((resume) => {
-          ws.onmessage = (event) => resume(Effect.succeed(event.data))
-        }),
-
-      close: () =>
-        Effect.sync(() => ws.close())
-    }
-  })
+  )
 )
 ```
 
@@ -288,10 +295,10 @@ When one layer depends on services from another:
 // ApiClient depends on Config
 const ApiClientLive = Layer.effect(
   ApiClient,
-  Effect.gen(function* () {
-    const config = yield* Config
-    return makeApiClient(config)
-  })
+  pipe(
+    Config,
+    Effect.map(config => makeApiClient(config))
+  )
 )
 // Layer<ApiClient, never, Config>
 
@@ -359,11 +366,12 @@ const DomainLayer = Layer.mergeAll(
 const AppLayer = DomainLayer
 
 // Now use it
-const program = Effect.gen(function* () {
-  const userService = yield* UserService
-  const user = yield* userService.getUser("123")
-  return user
-})
+const program = pipe(
+  UserService,
+  Effect.flatMap(userService =>
+    userService.getUser("123")
+  )
+)
 
 Effect.runPromise(program.pipe(Effect.provide(AppLayer)))
 ```
@@ -398,12 +406,9 @@ const ProdApiLayer = makeApiLayer("https://api.example.com")
 // Pattern 4: Extend existing layer
 const ApiWithLoggingLive = Layer.effect(
   ApiClient,
-  Effect.gen(function* () {
-    const api = yield* ApiClient // Get existing implementation
-    const logger = yield* Logger
-    
-    // Wrap with logging
-    return {
+  pipe(
+    Effect.all([ApiClient, Logger]),
+    Effect.map(([api, logger]) => ({
       get: <T>(url: string) =>
         pipe(
           logger.log(`GET ${url}`),
@@ -416,8 +421,8 @@ const ApiWithLoggingLive = Layer.effect(
           Effect.flatMap(() => api.post<T, B>(url, body)),
           Effect.tap(result => logger.log(`POST ${url} succeeded`))
         )
-    }
-  })
+    }))
+  )
 ).pipe(
   Layer.provide(Layer.merge(ApiClientLive, LoggerLive))
 )
@@ -438,14 +443,17 @@ Defer layer construction until actually needed:
 const makeUserServiceLayer = (userId: string) =>
   Layer.effect(
     UserService,
-    Effect.gen(function* () {
-      const api = yield* ApiClient
-      
-      // Fetch user-specific config
-      const userConfig = yield* api.get(`/config/${userId}`)
-      
-      return makeUserService(userConfig)
-    })
+    pipe(
+      ApiClient,
+      Effect.flatMap(api =>
+        pipe(
+          api.get(`/config/${userId}`),
+          Effect.map(userConfig =>
+            makeUserService(userConfig)
+          )
+        )
+      )
+    )
   )
 
 // Use in application
@@ -470,50 +478,57 @@ class MessageQueue extends Context.Tag("MessageQueue")<MessageQueue, MessageQueu
 
 const MessageQueueLive = Layer.scoped(
   MessageQueue,
-  Effect.gen(function* () {
-    const config = yield* Config
-    const logger = yield* Logger
-
-    // Connect to message broker
-    yield* logger.log("Connecting to message queue...")
-    const connection = yield* Effect.tryPromise({
-      try: () => connectToRabbitMQ(config.mqUrl),
-      catch: (error) => ({ _tag: "ConnectionFailed" as const, error })
-    })
-
-    // Wait for ready
-    yield* Effect.tryPromise({
-      try: () => connection.waitReady(),
-      catch: (error) => ({ _tag: "InitFailed" as const, error })
-    })
-
-    yield* logger.log("Message queue ready")
-
-    // Register cleanup
-    yield* Effect.addFinalizer(() =>
-      Effect.gen(function* () {
-        yield* logger.log("Disconnecting message queue")
-        yield* Effect.sync(() => connection.close())
-      })
-    )
-
-    return {
-      publish: (message) =>
-        Effect.tryPromise({
-          try: () => connection.publish(message),
-          catch: (error) => ({ _tag: "PublishFailed" as const, error })
-        }),
-
-      subscribe: () =>
-        Stream.asyncEffect<string>((emit) =>
-          Effect.sync(() => {
-            connection.on("message", (msg: string) => {
-              emit(Effect.succeed(Chunk.of(msg)))
-            })
+  pipe(
+    Effect.all([Config, Logger]),
+    Effect.flatMap(([config, logger]) =>
+      pipe(
+        logger.log("Connecting to message queue..."),
+        Effect.flatMap(() =>
+          Effect.tryPromise({
+            try: () => connectToRabbitMQ(config.mqUrl),
+            catch: (error) => ({ _tag: "ConnectionFailed" as const, error })
           })
+        ),
+        Effect.flatMap(connection =>
+          pipe(
+            Effect.tryPromise({
+              try: () => connection.waitReady(),
+              catch: (error) => ({ _tag: "InitFailed" as const, error })
+            }),
+            Effect.flatMap(() =>
+              logger.log("Message queue ready")
+            ),
+            Effect.flatMap(() =>
+              Effect.addFinalizer(() =>
+                pipe(
+                  logger.log("Disconnecting message queue"),
+                  Effect.flatMap(() =>
+                    Effect.sync(() => connection.close())
+                  )
+                )
+              )
+            ),
+            Effect.map(() => ({
+              publish: (message) =>
+                Effect.tryPromise({
+                  try: () => connection.publish(message),
+                  catch: (error) => ({ _tag: "PublishFailed" as const, error })
+                }),
+
+              subscribe: () =>
+                Stream.asyncEffect<string>((emit) =>
+                  Effect.sync(() => {
+                    connection.on("message", (msg: string) => {
+                      emit(Effect.succeed(Chunk.of(msg)))
+                    })
+                  })
+                )
+            }))
+          )
         )
-    }
-  })
+      )
+    )
+  )
 )
 ```
 
@@ -533,19 +548,20 @@ class TenantContext extends Context.Tag("TenantContext")<TenantContext, TenantCo
 const makeTenantDatabaseLayer = (tenantId: string) =>
   Layer.effect(
     Database,
-    Effect.gen(function* () {
-      const tenantCtx = yield* TenantContext
-
-      // Connect to tenant-specific database
-      const connection = yield* Effect.sync(() =>
-        createConnection(tenantCtx.config.dbUrl)
+    pipe(
+      TenantContext,
+      Effect.flatMap(tenantCtx =>
+        pipe(
+          Effect.sync(() =>
+            createConnection(tenantCtx.config.dbUrl)
+          ),
+          Effect.map(connection => ({
+            query: <T>(sql: string) =>
+              Effect.sync(() => connection.query<T>(sql))
+          }))
+        )
       )
-
-      return {
-        query: <T>(sql: string) =>
-          Effect.sync(() => connection.query<T>(sql))
-      }
-    })
+    )
   ).pipe(
     Layer.provide(
       Layer.succeed(TenantContext, {
@@ -577,31 +593,26 @@ class FeatureFlags extends Context.Tag("FeatureFlags")<FeatureFlags, FeatureFlag
 // Old implementation
 const UserServiceV1Live = Layer.effect(
   UserService,
-  Effect.gen(function* () {
-    return makeUserServiceV1()
-  })
+  Effect.sync(() => makeUserServiceV1())
 )
 
 // New implementation
 const UserServiceV2Live = Layer.effect(
   UserService,
-  Effect.gen(function* () {
-    return makeUserServiceV2()
-  })
+  Effect.sync(() => makeUserServiceV2())
 )
 
 // Dynamic layer selection
 const UserServiceLive = Layer.effect(
   UserService,
-  Effect.gen(function* () {
-    const flags = yield* FeatureFlags
-
-    if (flags.isEnabled("user-service-v2")) {
-      return makeUserServiceV2()
-    } else {
-      return makeUserServiceV1()
-    }
-  })
+  pipe(
+    FeatureFlags,
+    Effect.map(flags =>
+      flags.isEnabled("user-service-v2")
+        ? makeUserServiceV2()
+        : makeUserServiceV1()
+    )
+  )
 ).pipe(
   Layer.provide(FeatureFlagsLive)
 )
@@ -621,54 +632,60 @@ class ConnectionPool extends Context.Tag("ConnectionPool")<ConnectionPool, Conne
 
 const ConnectionPoolLive = Layer.scoped(
   ConnectionPool,
-  Effect.gen(function* () {
-    const config = yield* Config
-    const logger = yield* Logger
+  pipe(
+    Effect.all([Config, Logger]),
+    Effect.flatMap(([config, logger]) =>
+      pipe(
+        Effect.sync(() =>
+          createPool({
+            max: config.poolSize,
+            create: () => createConnection(config.dbUrl)
+          })
+        ),
+        Effect.flatMap(pool =>
+          pipe(
+            logger.log(`Connection pool created (size: ${config.poolSize})`),
+            Effect.flatMap(() =>
+              Effect.addFinalizer(() =>
+                pipe(
+                  logger.log("Draining connection pool"),
+                  Effect.flatMap(() =>
+                    Effect.sync(() => pool.drain())
+                  )
+                )
+              )
+            ),
+            Effect.map(() => ({
+              acquire: () =>
+                Effect.tryPromise({
+                  try: () => pool.acquire(),
+                  catch: (error) => ({ _tag: "PoolExhausted" as const, error })
+                }),
 
-    // Create pool
-    const pool = yield* Effect.sync(() =>
-      createPool({
-        max: config.poolSize,
-        create: () => createConnection(config.dbUrl)
-      })
+              release: (conn) =>
+                Effect.sync(() => pool.release(conn))
+            }))
+          )
+        )
+      )
     )
-
-    yield* logger.log(`Connection pool created (size: ${config.poolSize})`)
-
-    // Register cleanup
-    yield* Effect.addFinalizer(() =>
-      Effect.gen(function* () {
-        yield* logger.log("Draining connection pool")
-        yield* Effect.sync(() => pool.drain())
-      })
-    )
-
-    return {
-      acquire: () =>
-        Effect.tryPromise({
-          try: () => pool.acquire(),
-          catch: (error) => ({ _tag: "PoolExhausted" as const, error })
-        }),
-
-      release: (conn) =>
-        Effect.sync(() => pool.release(conn))
-    }
-  })
+  )
 )
 
 // Use with automatic release
 const withConnection = <A, E>(
   use: (conn: Connection) => Effect.Effect<A, E>
 ): Effect.Effect<A, E | PoolError> =>
-  Effect.gen(function* () {
-    const pool = yield* ConnectionPool
-    
-    return yield* Effect.acquireUseRelease(
-      pool.acquire(),
-      use,
-      (conn) => pool.release(conn)
+  pipe(
+    ConnectionPool,
+    Effect.flatMap(pool =>
+      Effect.acquireUseRelease(
+        pool.acquire(),
+        use,
+        (conn) => pool.release(conn)
+      )
     )
-  })
+  )
 ```
 
 ---
@@ -694,32 +711,31 @@ const AppLayer = Layer.mergeAll(
 // 2. Request-scoped
 const RequestLayer = Layer.scoped(
   RequestContext,
-  Effect.gen(function* () {
-    const requestId = yield* Effect.sync(() => generateId())
-    
-    yield* Effect.addFinalizer(() =>
-      Console.log(`Request ${requestId} completed`)
+  pipe(
+    Effect.sync(() => generateId()),
+    Effect.flatMap(requestId =>
+      pipe(
+        Effect.addFinalizer(() =>
+          Console.log(`Request ${requestId} completed`)
+        ),
+        Effect.map(() => ({ requestId }))
+      )
     )
-    
-    return { requestId }
-  })
+  )
 )
 
 // New RequestContext for each request
 
 // 3. Manual scope management
-const program = Effect.gen(function* () {
-  // Create a scope
-  yield* Effect.scoped(
-    Effect.gen(function* () {
-      // Resources in this scope
-      const db = yield* Database
-      const result = yield* db.query("SELECT * FROM users")
-      return result
-    })
+const program = Effect.scoped(
+  pipe(
+    Database,
+    Effect.flatMap(db =>
+      db.query("SELECT * FROM users")
+    )
   )
-  // Scope closed, resources cleaned up
-})
+)
+// Scope closed, resources cleaned up
 ```
 
 ### Layer Memoization
@@ -729,18 +745,19 @@ Layers are memoized by default - same layer instance is reused:
 ```typescript
 const ExpensiveServiceLive = Layer.effect(
   ExpensiveService,
-  Effect.gen(function* () {
-    console.log("Building ExpensiveService") // Only runs once
-    yield* Effect.sleep("5 seconds")
-    return makeExpensiveService()
-  })
+  pipe(
+    Effect.sync(() => console.log("Building ExpensiveService")),
+    Effect.flatMap(() => Effect.sleep("5 seconds")),
+    Effect.map(() => makeExpensiveService())
+  )
 )
 
-const program = Effect.gen(function* () {
-  const svc1 = yield* ExpensiveService
-  const svc2 = yield* ExpensiveService
-  // Both use the same instance, built only once
-})
+const program = pipe(
+  Effect.all([ExpensiveService, ExpensiveService]),
+  Effect.map(([svc1, svc2]) => {
+    // Both use the same instance, built only once
+  })
+)
 
 Effect.runPromise(program.pipe(Effect.provide(ExpensiveServiceLive)))
 ```
@@ -752,18 +769,20 @@ Force a new instance each time:
 ```typescript
 const FreshServiceLive = Layer.effect(
   Service,
-  Effect.gen(function* () {
-    console.log("Building Service") // Runs every time
-    return makeService()
-  })
+  pipe(
+    Effect.sync(() => console.log("Building Service")),
+    Effect.map(() => makeService())
+  )
 ).pipe(Layer.fresh)
 
 // Or use Layer.unwrapEffect for dynamic construction
 const DynamicLayer = Layer.unwrapEffect(
-  Effect.gen(function* () {
-    const config = yield* Effect.sync(() => loadConfig())
-    return Layer.succeed(Service, makeService(config))
-  })
+  pipe(
+    Effect.sync(() => loadConfig()),
+    Effect.map(config =>
+      Layer.succeed(Service, makeService(config))
+    )
+  )
 )
 ```
 
@@ -805,15 +824,17 @@ const TestLayer = Layer.mergeAll(
 // Use in tests
 describe("UserService", () => {
   it("should fetch user", async () => {
-    const program = Effect.gen(function* () {
-      const userService = yield* UserService
-      return yield* userService.getUser("123")
-    })
-    
+    const program = pipe(
+      UserService,
+      Effect.flatMap(userService =>
+        userService.getUser("123")
+      )
+    )
+
     const result = await Effect.runPromise(
       program.pipe(Effect.provide(TestLayer))
     )
-    
+
     expect(result.name).toBe("Test User")
   })
 })
@@ -824,33 +845,37 @@ describe("UserService", () => {
 Track calls to services:
 
 ```typescript
-const makeSpyLogger = Effect.gen(function* () {
-  const calls = yield* Ref.make<string[]>([])
-  
-  return {
+const makeSpyLogger = pipe(
+  Ref.make<string[]>([]),
+  Effect.map(calls => ({
     service: {
       log: (message: string) =>
         Ref.update(calls, prev => [...prev, message])
     },
     getCalls: () => Ref.get(calls)
-  }
-})
+  }))
+)
 
 const SpyLoggerLayer = Layer.unwrapEffect(
-  Effect.gen(function* () {
-    const spy = yield* makeSpyLogger
-    return Layer.succeed(Logger, spy.service)
-  })
+  pipe(
+    makeSpyLogger,
+    Effect.map(spy =>
+      Layer.succeed(Logger, spy.service)
+    )
+  )
 )
 
 // Test with spy
-const test = Effect.gen(function* () {
-  const logger = yield* Logger
-  yield* logger.log("message 1")
-  yield* logger.log("message 2")
-  
-  // How to access spy? Need to restructure...
-})
+const test = pipe(
+  Logger,
+  Effect.flatMap(logger =>
+    pipe(
+      logger.log("message 1"),
+      Effect.flatMap(() => logger.log("message 2"))
+    )
+  )
+)
+// How to access spy? Need to restructure...
 
 // Better pattern: export spy reference
 interface LoggerSpy {
@@ -861,11 +886,9 @@ class LoggerSpy extends Context.Tag("LoggerSpy")<LoggerSpy, LoggerSpy>() {}
 
 const SpyLoggerLayerWithRef = Layer.effect(
   Logger,
-  Effect.gen(function* () {
-    const calls = yield* Ref.make<string[]>([])
-
-    // Provide both Logger and LoggerSpy
-    return {
+  pipe(
+    Ref.make<string[]>([]),
+    Effect.map(calls => ({
       logger: {
         log: (message: string) =>
           Ref.update(calls, prev => [...prev, message])
@@ -873,8 +896,8 @@ const SpyLoggerLayerWithRef = Layer.effect(
       spy: {
         getCalls: () => Ref.get(calls)
       }
-    }
-  })
+    }))
+  )
 )
 ```
 
@@ -1048,11 +1071,10 @@ const SlowLayer = ServiceCLive.pipe(
 // Don't initialize until actually used
 const LazyDatabaseLive = Layer.effect(
   Database,
-  Effect.gen(function* () {
-    // This only runs when Database is first accessed
-    const connection = yield* Effect.sync(() => createConnection())
-    return makeDatabase(connection)
-  })
+  pipe(
+    Effect.sync(() => createConnection()),
+    Effect.map(connection => makeDatabase(connection))
+  )
 )
 ```
 
@@ -1062,32 +1084,34 @@ const LazyDatabaseLive = Layer.effect(
 // Share expensive resources
 const ConnectionPoolLayer = Layer.scoped(
   ConnectionPool,
-  Effect.gen(function* () {
-    const pool = yield* Effect.sync(() => createPool({ size: 10 }))
-    
-    yield* Effect.addFinalizer(() =>
-      Effect.sync(() => pool.drain())
+  pipe(
+    Effect.sync(() => createPool({ size: 10 })),
+    Effect.flatMap(pool =>
+      pipe(
+        Effect.addFinalizer(() =>
+          Effect.sync(() => pool.drain())
+        ),
+        Effect.map(() => pool)
+      )
     )
-    
-    return pool
-  })
+  )
 )
 
 // Multiple services use the same pool
 const UserRepoLive = Layer.effect(
   UserRepository,
-  Effect.gen(function* () {
-    const pool = yield* ConnectionPool
-    return makeUserRepo(pool)
-  })
+  pipe(
+    ConnectionPool,
+    Effect.map(pool => makeUserRepo(pool))
+  )
 )
 
 const PostRepoLive = Layer.effect(
   PostRepository,
-  Effect.gen(function* () {
-    const pool = yield* ConnectionPool
-    return makePostRepo(pool)
-  })
+  pipe(
+    ConnectionPool,
+    Effect.map(pool => makePostRepo(pool))
+  )
 )
 
 const AppLayer = Layer.mergeAll(

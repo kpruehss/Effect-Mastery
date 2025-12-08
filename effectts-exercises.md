@@ -505,12 +505,16 @@ interface Logger {
 // TODO: Create layers for both implementations
 
 // TODO: Use logger in an application
-const application = Effect.gen(function* () {
-  const logger = yield* Logger
-  yield* logger.info("Application started")
-  yield* logger.debug("Processing data...")
-  yield* logger.warn("Low memory warning")
-})
+const application = pipe(
+  Logger,
+  Effect.flatMap(logger =>
+    pipe(
+      logger.info("Application started"),
+      Effect.flatMap(() => logger.debug("Processing data...")),
+      Effect.flatMap(() => logger.warn("Low memory warning"))
+    )
+  )
+)
 ```
 
 **Solution:**
@@ -555,13 +559,17 @@ const FileLogger: Logger = {
 const FileLoggerLive = Layer.succeed(Logger, FileLogger)
 
 // Application using logger
-const application = Effect.gen(function* () {
-  const logger = yield* Logger
-  yield* logger.info("Application started")
-  yield* logger.debug("Processing data...")
-  yield* logger.warn("Low memory warning")
-  return "Complete"
-})
+const application = pipe(
+  Logger,
+  Effect.flatMap(logger =>
+    pipe(
+      logger.info("Application started"),
+      Effect.flatMap(() => logger.debug("Processing data...")),
+      Effect.flatMap(() => logger.warn("Low memory warning")),
+      Effect.map(() => "Complete")
+    )
+  )
+)
 
 // Run with different logger implementations
 Effect.runPromise(application.pipe(Effect.provide(ConsoleLoggerLive)))
@@ -636,28 +644,31 @@ interface UserService {
 
 class UserService extends Context.Tag("UserService")<UserService, UserService>() {}
 
-const UserServiceLive = Layer.effect(UserService, Effect.gen(function* () {
-  const logger = yield* Logger
-  const api = yield* ApiClient
+const UserServiceLive = Layer.effect(UserService, pipe(
+  Logger,
+  Effect.flatMap(logger =>
+    pipe(
+      ApiClient,
+      Effect.map(api => ({
+        getUser: (id) =>
+          pipe(
+            logger.log(`Fetching user ${id}`),
+            Effect.flatMap(() => api.get<User>(`/users/${id}`)),
+            Effect.mapError(() => ({ _tag: "UserNotFound" as const })),
+            Effect.tap(user => logger.log(`Retrieved user ${user.name}`))
+          ),
 
-  return {
-    getUser: (id) =>
-      pipe(
-        logger.log(`Fetching user ${id}`),
-        Effect.flatMap(() => api.get<User>(`/users/${id}`)),
-        Effect.mapError(() => ({ _tag: "UserNotFound" as const })),
-        Effect.tap(user => logger.log(`Retrieved user ${user.name}`))
-      ),
-
-    createUser: (data) =>
-      pipe(
-        logger.log(`Creating user ${data.email}`),
-        Effect.flatMap(() => api.post<User>("/users", data)),
-        Effect.mapError(() => ({ _tag: "CreateFailed" as const })),
-        Effect.tap(user => logger.log(`Created user ${user.id}`))
-      )
-  }
-}))
+        createUser: (data) =>
+          pipe(
+            logger.log(`Creating user ${data.email}`),
+            Effect.flatMap(() => api.post<User>("/users", data)),
+            Effect.mapError(() => ({ _tag: "CreateFailed" as const })),
+            Effect.tap(user => logger.log(`Created user ${user.id}`))
+          )
+      }))
+    )
+  )
+))
 
 // Mock implementations
 const LoggerLive = Layer.succeed(Logger, {
@@ -677,11 +688,10 @@ const AppLayer = UserServiceLive.pipe(
 )
 
 // Usage
-const program = Effect.gen(function* () {
-  const userService = yield* UserService
-  const user = yield* userService.getUser("123")
-  return user
-})
+const program = pipe(
+  UserService,
+  Effect.flatMap(userService => userService.getUser("123"))
+)
 
 Effect.runPromise(program.pipe(Effect.provide(AppLayer)))
 ```
@@ -736,10 +746,9 @@ interface MockPaymentService extends PaymentService {
   readonly getCalls: () => Effect.Effect<Array<{ amount: number; cardToken: string }>>
 }
 
-const MockPaymentServiceLayer = Layer.effect(PaymentService, Effect.gen(function* () {
-  const calls = yield* Ref.make<Array<{ amount: number; cardToken: string }>>([])
-
-  return {
+const MockPaymentServiceLayer = Layer.effect(PaymentService, pipe(
+  Ref.make<Array<{ amount: number; cardToken: string }>>([]),
+  Effect.map(calls => ({
     processPayment: (amount: number, cardToken: string) =>
       pipe(
         Ref.update(calls, prev => [...prev, { amount, cardToken }]),
@@ -755,28 +764,22 @@ const MockPaymentServiceLayer = Layer.effect(PaymentService, Effect.gen(function
       ),
 
     getCalls: () => Ref.get(calls)
-  }
-}))
+  }))
+))
 
 // Business logic to test
 const checkout = (amount: number, cardToken: string) =>
-  Effect.gen(function* () {
-    const payment = yield* PaymentService
-    const result = yield* payment.processPayment(amount, cardToken)
-    return result
-  })
+  pipe(
+    PaymentService,
+    Effect.flatMap(payment => payment.processPayment(amount, cardToken))
+  )
 
 // Test
-const test = Effect.gen(function* () {
-  // Perform checkout
-  const result = yield* checkout(100, "valid-token")
-  
-  console.log("Payment result:", result)
-  
-  // Verify mock was called (if we kept reference to mock)
-  // This demonstrates testing pattern
-  return result.status === "success"
-})
+const test = pipe(
+  checkout(100, "valid-token"),
+  Effect.tap(result => Effect.sync(() => console.log("Payment result:", result))),
+  Effect.map(result => result.status === "success")
+)
 
 Effect.runPromise(test.pipe(Effect.provide(MockPaymentServiceLayer)))
 ```
@@ -1715,20 +1718,17 @@ const getUser = (id: string) =>
   Effect.request(GetUser({ id, _tag: "GetUser" }), UserResolver)
 
 // Usage - these will be batched into a single request
-const program = Effect.gen(function* () {
-  // All three requests will be batched together
-  const users = yield* Effect.all(
+const program = pipe(
+  Effect.all(
     [
       getUser("1"),
       getUser("2"),
       getUser("3")
     ],
     { batching: true }
-  )
-  
-  console.log("Users:", users)
-  return users
-})
+  ),
+  Effect.tap(users => Effect.sync(() => console.log("Users:", users)))
+)
 
 // Run the program
 Effect.runPromise(program)
@@ -1766,37 +1766,34 @@ const expensiveComputation = (input: string): Effect.Effect<string, never> => {
 }
 
 // Create cache
-const makeComputationCache = Effect.gen(function* () {
-  return yield* Cache.make({
-    capacity: 100,
-    timeToLive: Duration.minutes(5),
-    lookup: (key: string) => expensiveComputation(key)
-  })
+const makeComputationCache = Cache.make({
+  capacity: 100,
+  timeToLive: Duration.minutes(5),
+  lookup: (key: string) => expensiveComputation(key)
 })
 
 // Usage
-const program = Effect.gen(function* () {
-  const cache = yield* makeComputationCache
-  
-  console.log("First call:")
-  const result1 = yield* Cache.get(cache, "hello")
-  console.log("Result:", result1)
-  
-  console.log("\nSecond call (cached):")
-  const result2 = yield* Cache.get(cache, "hello")
-  console.log("Result:", result2)
-  
-  console.log("\nDifferent key:")
-  const result3 = yield* Cache.get(cache, "world")
-  console.log("Result:", result3)
-  
-  console.log("\nWait for expiration...")
-  yield* Effect.sleep(Duration.minutes(6))
-  
-  console.log("\nAfter expiration:")
-  const result4 = yield* Cache.get(cache, "hello")
-  console.log("Result:", result4)
-})
+const program = pipe(
+  makeComputationCache,
+  Effect.flatMap(cache =>
+    pipe(
+      Effect.sync(() => console.log("First call:")),
+      Effect.flatMap(() => Cache.get(cache, "hello")),
+      Effect.tap(result1 => Effect.sync(() => console.log("Result:", result1))),
+      Effect.flatMap(() => Effect.sync(() => console.log("\nSecond call (cached):"))),
+      Effect.flatMap(() => Cache.get(cache, "hello")),
+      Effect.tap(result2 => Effect.sync(() => console.log("Result:", result2))),
+      Effect.flatMap(() => Effect.sync(() => console.log("\nDifferent key:"))),
+      Effect.flatMap(() => Cache.get(cache, "world")),
+      Effect.tap(result3 => Effect.sync(() => console.log("Result:", result3))),
+      Effect.flatMap(() => Effect.sync(() => console.log("\nWait for expiration..."))),
+      Effect.flatMap(() => Effect.sleep(Duration.minutes(6))),
+      Effect.flatMap(() => Effect.sync(() => console.log("\nAfter expiration:"))),
+      Effect.flatMap(() => Cache.get(cache, "hello")),
+      Effect.tap(result4 => Effect.sync(() => console.log("Result:", result4)))
+    )
+  )
+)
 
 Effect.runPromise(program)
 ```
@@ -1861,12 +1858,11 @@ interface TodoService {
   readonly deleteTodo: (id: string) => Effect.Effect<void, TodoError>
 }
 
-const makeTodoService = Effect.gen(function* () {
-  const todos = yield* Ref.make<Todo[]>([])
-  
-  return {
+const makeTodoService = pipe(
+  Ref.make<Todo[]>([]),
+  Effect.map(todos => ({
     todos,
-    
+
     addTodo: (text: string) => {
       const optimisticTodo: Todo = {
         id: `temp-${Date.now()}`,
@@ -1874,7 +1870,7 @@ const makeTodoService = Effect.gen(function* () {
         completed: false,
         _optimistic: true
       }
-      
+
       return pipe(
         // Add optimistically
         Ref.update(todos, ts => [...ts, optimisticTodo]),
@@ -1893,7 +1889,7 @@ const makeTodoService = Effect.gen(function* () {
         )
       )
     },
-    
+
     deleteTodo: (id: string) =>
       pipe(
         Ref.get(todos),
@@ -1902,7 +1898,7 @@ const makeTodoService = Effect.gen(function* () {
           if (!todo) {
             return Effect.fail({ _tag: "DeleteFailed" as const })
           }
-          
+
           return pipe(
             // Remove optimistically
             Ref.update(todos, ts => ts.filter(t => t.id !== id)),
@@ -1914,33 +1910,36 @@ const makeTodoService = Effect.gen(function* () {
           )
         })
       )
-  }
-})
+  }))
+)
 
 // Usage example
-const demo = Effect.gen(function* () {
-  const service = yield* makeTodoService
-  
-  console.log("Adding todo...")
-  yield* service.addTodo("Buy milk")
-  
-  const todos1 = yield* Ref.get(service.todos)
-  console.log("Todos (with optimistic):", todos1)
-  
-  // Wait for server response
-  yield* Effect.sleep("1 second")
-  
-  const todos2 = yield* Ref.get(service.todos)
-  console.log("Todos (after server):", todos2)
-  
-  console.log("\nDeleting todo...")
-  if (todos2[0]) {
-    yield* service.deleteTodo(todos2[0].id)
-  }
-  
-  const todos3 = yield* Ref.get(service.todos)
-  console.log("Todos (after delete):", todos3)
-})
+const demo = pipe(
+  makeTodoService,
+  Effect.flatMap(service =>
+    pipe(
+      Effect.sync(() => console.log("Adding todo...")),
+      Effect.flatMap(() => service.addTodo("Buy milk")),
+      Effect.flatMap(() => Ref.get(service.todos)),
+      Effect.tap(todos1 => Effect.sync(() => console.log("Todos (with optimistic):", todos1))),
+      Effect.flatMap(() => Effect.sleep("1 second")),
+      Effect.flatMap(() => Ref.get(service.todos)),
+      Effect.tap(todos2 => Effect.sync(() => console.log("Todos (after server):", todos2))),
+      Effect.flatMap(todos2 =>
+        pipe(
+          Effect.sync(() => console.log("\nDeleting todo...")),
+          Effect.flatMap(() =>
+            todos2[0]
+              ? service.deleteTodo(todos2[0].id)
+              : Effect.void
+          ),
+          Effect.flatMap(() => Ref.get(service.todos)),
+          Effect.tap(todos3 => Effect.sync(() => console.log("Todos (after delete):", todos3)))
+        )
+      )
+    )
+  )
+)
 
 Effect.runPromise(demo)
 ```

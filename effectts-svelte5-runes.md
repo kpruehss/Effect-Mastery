@@ -212,11 +212,10 @@ export function createEffectState<A, E>(
   
   // Derive a computation (not run yet)
   let computation = $derived(
-    Effect.gen(function* () {
-      // Expensive computation
-      yield* Effect.sleep("1 second")
-      return count * factor
-    })
+    pipe(
+      Effect.sleep("1 second"),
+      Effect.map(() => count * factor)
+    )
   )
   
   let result = $state<number | null>(null)
@@ -274,17 +273,18 @@ export function createEffectState<A, E>(
   let messages = $state<string[]>([])
   
   $effect(() => {
-    const program = Effect.gen(function* () {
-      const ws = yield* connectWebSocket()
-      
-      yield* Stream.runForEach(
-        ws.messages,
-        (message) => Effect.sync(() => {
-          messages = [...messages, message]
-        })
+    const program = pipe(
+      connectWebSocket(),
+      Effect.flatMap((ws) =>
+        Stream.runForEach(
+          ws.messages,
+          (message) => Effect.sync(() => {
+            messages = [...messages, message]
+          })
+        )
       )
-    })
-    
+    )
+
     const fiber = Effect.runFork(program)
     
     // Cleanup
@@ -312,17 +312,16 @@ export function createEffectState<A, E>(
   let stats = $state<Stats | null>(null)
   
   $effect(() => {
-    const program = Effect.gen(function* () {
-      // Poll every 5 seconds
-      yield* Effect.repeat(
-        Effect.gen(function* () {
-          const data = yield* fetchStats()
+    const program = Effect.repeat(
+      pipe(
+        fetchStats(),
+        Effect.map((data) => {
           stats = data
-        }),
-        Schedule.fixed("5 seconds")
-      )
-    })
-    
+        })
+      ),
+      Schedule.fixed("5 seconds")
+    )
+
     const fiber = Effect.runFork(program)
     
     return () => {
@@ -350,14 +349,17 @@ import type { PageLoad } from "./$types"
 
 export const load: PageLoad = async ({ params, fetch }) => {
   const result = await Effect.runPromiseExit(
-    Effect.gen(function* () {
-      const user = yield* fetchUser(params.id)
-      const posts = yield* fetchUserPosts(params.id)
-      
-      return { user, posts }
-    })
+    pipe(
+      fetchUser(params.id),
+      Effect.flatMap((user) =>
+        pipe(
+          fetchUserPosts(params.id),
+          Effect.map((posts) => ({ user, posts }))
+        )
+      )
+    )
   )
-  
+
   if (result._tag === "Success") {
     return result.value
   } else {
@@ -399,19 +401,14 @@ export const actions = {
     const formData = await request.formData()
     const title = formData.get("title") as string
     const content = formData.get("content") as string
-    
+
     const result = await Effect.runPromiseExit(
-      Effect.gen(function* () {
-        // Validate
-        const validated = yield* validatePost({ title, content })
-        
-        // Create post
-        const post = yield* createPost(validated)
-        
-        return post
-      })
+      pipe(
+        validatePost({ title, content }),
+        Effect.flatMap((validated) => createPost(validated))
+      )
     )
-    
+
     if (result._tag === "Success") {
       return { success: true, post: result.value }
     } else {
@@ -455,14 +452,11 @@ import type { RequestHandler } from "./$types"
 
 export const GET: RequestHandler = async ({ url }) => {
   const limit = parseInt(url.searchParams.get("limit") ?? "10")
-  
+
   const result = await Effect.runPromiseExit(
-    Effect.gen(function* () {
-      const users = yield* fetchUsers({ limit })
-      return users
-    })
+    fetchUsers({ limit })
   )
-  
+
   if (result._tag === "Success") {
     return json(result.value)
   } else {
@@ -472,15 +466,14 @@ export const GET: RequestHandler = async ({ url }) => {
 
 export const POST: RequestHandler = async ({ request }) => {
   const body = await request.json()
-  
+
   const result = await Effect.runPromiseExit(
-    Effect.gen(function* () {
-      const validated = yield* validateUser(body)
-      const user = yield* createUser(validated)
-      return user
-    })
+    pipe(
+      validateUser(body),
+      Effect.flatMap((validated) => createUser(validated))
+    )
   )
-  
+
   if (result._tag === "Success") {
     return json(result.value, { status: 201 })
   } else {
@@ -724,22 +717,21 @@ export const POST: RequestHandler = async ({ request }) => {
   // Poll stats every 5 seconds
   $effect(() => {
     connected = true
-    
-    const program = Effect.gen(function* () {
-      yield* Effect.repeat(
-        Effect.gen(function* () {
-          const data = yield* Effect.tryPromise({
-            try: () => fetch("/api/stats").then(r => r.json()),
-            catch: (error) => ({ _tag: "FetchFailed" as const, error })
-          })
-          
+
+    const program = Effect.repeat(
+      pipe(
+        Effect.tryPromise({
+          try: () => fetch("/api/stats").then(r => r.json()),
+          catch: (error) => ({ _tag: "FetchFailed" as const, error })
+        }),
+        Effect.map((data) => {
           stats = data
           lastUpdated = new Date()
-        }),
-        Schedule.fixed("5 seconds")
-      )
-    })
-    
+        })
+      ),
+      Schedule.fixed("5 seconds")
+    )
+
     const fiber = Effect.runFork(program)
     
     // Cleanup

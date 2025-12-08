@@ -87,10 +87,10 @@ Create form with validation:
   import { TaskService } from "$services/TaskService"
 
   const tasksState = createEffectState(
-    Effect.gen(function* () {
-      const service = yield* TaskService
-      return yield* service.listTasks()
-    })
+    pipe(
+      TaskService,
+      Effect.flatMap((service) => service.listTasks())
+    )
   )
 </script>
 
@@ -110,10 +110,10 @@ Create form with validation:
   async function handleCreate(input: CreateTaskInput) {
     // UI updates immediately
     const result = await Effect.runPromiseExit(
-      Effect.gen(function* () {
-        const service = yield* TaskService
-        return yield* service.createTask(input)
-      }),
+      pipe(
+        TaskService,
+        Effect.flatMap((service) => service.createTask(input))
+      ),
       { runtime: AppRuntime }
     )
 
@@ -135,16 +135,17 @@ Create form with validation:
   import { WebSocketService } from "$services/WebSocketService"
 
   $effect(() => {
-    const program = Effect.gen(function* () {
-      const ws = yield* WebSocketService
-
-      yield* Stream.runForEach(
-        ws.messages,
-        (message) => Effect.sync(() => {
-          handleRealtimeUpdate(message)
-        })
+    const program = pipe(
+      WebSocketService,
+      Effect.flatMap((ws) =>
+        Stream.runForEach(
+          ws.messages,
+          (message) => Effect.sync(() => {
+            handleRealtimeUpdate(message)
+          })
+        )
       )
-    })
+    )
 
     const fiber = Effect.runFork(program, { runtime: AppRuntime })
 

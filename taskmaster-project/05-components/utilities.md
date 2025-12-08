@@ -88,10 +88,10 @@ export function createRefreshableEffect<A, E>(
   import { TaskService } from "$services/TaskService"
 
   const tasksState = createEffectState(
-    Effect.gen(function* () {
-      const service = yield* TaskService
-      return yield* service.listTasks()
-    })
+    pipe(
+      TaskService,
+      Effect.flatMap((service) => service.listTasks())
+    )
   )
 </script>
 
@@ -115,10 +115,10 @@ export function createRefreshableEffect<A, E>(
   import { createRefreshableEffect } from "$stores/effect-runes.svelte"
 
   const statsState = createRefreshableEffect(() =>
-    Effect.gen(function* () {
-      const api = yield* ApiClient
-      return yield* api.get("/stats")
-    })
+    pipe(
+      ApiClient,
+      Effect.flatMap((api) => api.get("/stats"))
+    )
   )
 </script>
 
