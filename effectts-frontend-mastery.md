@@ -444,7 +444,7 @@ interface Logger {
 }
 
 // Create a Tag (service identifier)
-const Logger = Context.GenericTag<Logger>("Logger")
+class Logger extends Context.Tag("Logger")<Logger, Logger>() {}
 
 // Use the service
 const greetUser = (name: string) =>
@@ -487,7 +487,7 @@ interface ApiClient {
   readonly post: <T, B>(url: string, body: B) => Effect.Effect<T, ApiError>
 }
 
-const ApiClient = Context.GenericTag<ApiClient>("ApiClient")
+class ApiClient extends Context.Tag("ApiClient")<ApiClient, ApiClient>() {}
 
 type ApiError = 
   | { _tag: "NetworkError"; cause: unknown }
@@ -499,62 +499,59 @@ interface AppConfig {
   readonly timeout: number
 }
 
-const AppConfig = Context.GenericTag<AppConfig>("AppConfig")
-
-// Implementation that depends on config
-const makeApiClient = (config: AppConfig): ApiClient => ({
-  get: <T>(url: string) =>
-    Effect.tryPromise({
-      try: async () => {
-        const controller = new AbortController()
-        const timeout = setTimeout(() => controller.abort(), config.timeout)
-        
-        const response = await fetch(`${config.apiBaseUrl}${url}`, {
-          signal: controller.signal
-        })
-        
-        clearTimeout(timeout)
-        
-        if (!response.ok) {
-          throw { status: response.status }
-        }
-        
-        return response.json() as Promise<T>
-      },
-      catch: (error) => 
-        typeof error === "object" && error !== null && "status" in error
-          ? { _tag: "InvalidResponse" as const, status: error.status as number }
-          : { _tag: "NetworkError" as const, cause: error }
-    }),
-  
-  post: <T, B>(url: string, body: B) =>
-    Effect.tryPromise({
-      try: async () => {
-        const response = await fetch(`${config.apiBaseUrl}${url}`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(body)
-        })
-        
-        if (!response.ok) {
-          throw { status: response.status }
-        }
-        
-        return response.json() as Promise<T>
-      },
-      catch: (error) =>
-        typeof error === "object" && error !== null && "status" in error
-          ? { _tag: "InvalidResponse" as const, status: error.status as number }
-          : { _tag: "NetworkError" as const, cause: error }
-    })
-})
+class AppConfig extends Context.Tag("AppConfig")<AppConfig, AppConfig>() {}
 
 // Create a Layer (wires up dependencies)
 const ApiClientLive = Layer.effect(
   ApiClient,
   Effect.gen(function* () {
     const config = yield* AppConfig
-    return makeApiClient(config)
+    return {
+      get: <T>(url: string) =>
+        Effect.tryPromise({
+          try: async () => {
+            const controller = new AbortController()
+            const timeout = setTimeout(() => controller.abort(), config.timeout)
+
+            const response = await fetch(`${config.apiBaseUrl}${url}`, {
+              signal: controller.signal
+            })
+
+            clearTimeout(timeout)
+
+            if (!response.ok) {
+              throw { status: response.status }
+            }
+
+            return response.json() as Promise<T>
+          },
+          catch: (error) =>
+            typeof error === "object" && error !== null && "status" in error
+              ? { _tag: "InvalidResponse" as const, status: error.status as number }
+              : { _tag: "NetworkError" as const, cause: error }
+        }),
+
+      post: <T, B>(url: string, body: B) =>
+        Effect.tryPromise({
+          try: async () => {
+            const response = await fetch(`${config.apiBaseUrl}${url}`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify(body)
+            })
+
+            if (!response.ok) {
+              throw { status: response.status }
+            }
+
+            return response.json() as Promise<T>
+          },
+          catch: (error) =>
+            typeof error === "object" && error !== null && "status" in error
+              ? { _tag: "InvalidResponse" as const, status: error.status as number }
+              : { _tag: "NetworkError" as const, cause: error }
+        })
+    }
   })
 )
 
@@ -628,59 +625,55 @@ interface UserCache {
   readonly set: (id: string, user: User) => Effect.Effect<void>
 }
 
-const UserCache = Context.GenericTag<UserCache>("UserCache")
+class UserCache extends Context.Tag("UserCache")<UserCache, UserCache>() {}
 
-const makeUserCache = Effect.gen(function* () {
+const UserCacheLive = Layer.effect(UserCache, Effect.gen(function* () {
   const cache = yield* Ref.make<Map<string, User>>(new Map())
-  
-  return UserCache.of({
+
+  return {
     get: (id) =>
       pipe(
         Ref.get(cache),
         Effect.map(map => Option.fromNullable(map.get(id)))
       ),
-    
+
     set: (id, user) =>
       Ref.update(cache, map => new Map(map).set(id, user))
-  })
-})
-
-const UserCacheLive = Layer.effect(UserCache, makeUserCache)
+  }
+}))
 
 // Service that depends on other services
 interface UserRepository {
   readonly fetchUser: (id: string) => Effect.Effect<User, RepositoryError>
 }
 
-const UserRepository = Context.GenericTag<UserRepository>("UserRepository")
-
-const makeUserRepository = Effect.gen(function* () {
-  const api = yield* ApiClient
-  const cache = yield* UserCache
-  
-  return UserRepository.of({
-    fetchUser: (id) =>
-      pipe(
-        cache.get(id),
-        Effect.flatMap(Option.match({
-          onNone: () =>
-            pipe(
-              api.get<User>(`/users/${id}`),
-              Effect.tap(user => cache.set(id, user)),
-              Effect.mapError(() => ({ 
-                _tag: "FetchFailed" as const,
-                userId: id 
-              }))
-            ),
-          onSome: (user) => Effect.succeed(user)
-        }))
-      )
-  })
-})
+class UserRepository extends Context.Tag("UserRepository")<UserRepository, UserRepository>() {}
 
 const UserRepositoryLive = Layer.effect(
   UserRepository,
-  makeUserRepository
+  Effect.gen(function* () {
+    const api = yield* ApiClient
+    const cache = yield* UserCache
+
+    return {
+      fetchUser: (id) =>
+        pipe(
+          cache.get(id),
+          Effect.flatMap(Option.match({
+            onNone: () =>
+              pipe(
+                api.get<User>(`/users/${id}`),
+                Effect.tap(user => cache.set(id, user)),
+                Effect.mapError(() => ({
+                  _tag: "FetchFailed" as const,
+                  userId: id
+                }))
+              ),
+            onSome: (user) => Effect.succeed(user)
+          }))
+        )
+    }
+  })
 ).pipe(
   Layer.provide(ApiClientLive),
   Layer.provide(UserCacheLive)
@@ -1469,7 +1462,7 @@ interface FeatureFlags {
   readonly refresh: () => Effect.Effect<void>
 }
 
-const FeatureFlags = Context.GenericTag<FeatureFlags>("FeatureFlags")
+class FeatureFlags extends Context.Tag("FeatureFlags")<FeatureFlags, FeatureFlags>() {}
 
 type FlagConfig = Record<string, {
   enabled: boolean
@@ -1477,18 +1470,18 @@ type FlagConfig = Record<string, {
   rollout?: number // 0-100 percentage
 }>
 
-const makeFeatureFlags = Effect.gen(function* () {
+const FeatureFlagsLive = Layer.effect(FeatureFlags, Effect.gen(function* () {
   const api = yield* ApiClient
   const flags = yield* Ref.make<FlagConfig>({})
-  
+
   const fetchFlags = pipe(
     api.get<FlagConfig>("/api/flags"),
     Effect.flatMap(config => Ref.set(flags, config))
   )
-  
+
   // Initial fetch
   yield* fetchFlags
-  
+
   const getUserBucket = (userId: string, flag: string): number => {
     // Consistent hashing for A/B testing
     let hash = 0
@@ -1499,8 +1492,8 @@ const makeFeatureFlags = Effect.gen(function* () {
     }
     return Math.abs(hash) % 100
   }
-  
-  return FeatureFlags.of({
+
+  return {
     isEnabled: (flag) =>
       pipe(
         Ref.get(flags),
@@ -1508,28 +1501,26 @@ const makeFeatureFlags = Effect.gen(function* () {
           const flagConfig = config[flag]
           if (!flagConfig) return false
           if (!flagConfig.enabled) return false
-          
+
           if (flagConfig.rollout !== undefined) {
             // Get user from context if available
             const bucket = getUserBucket("default", flag)
             return bucket < flagConfig.rollout
           }
-          
+
           return true
         })
       ),
-    
+
     getVariant: (flag) =>
       pipe(
         Ref.get(flags),
         Effect.map(config => config[flag]?.variant ?? null)
       ),
-    
-    refresh: fetchFlags
-  })
-})
 
-const FeatureFlagsLive = Layer.effect(FeatureFlags, makeFeatureFlags)
+    refresh: fetchFlags
+  }
+}))
 
 // Usage in components
 const ConditionalFeature = () => {
@@ -1638,75 +1629,73 @@ export interface UserRepository {
   readonly deleteUser: (id: string) => Effect.Effect<void, RepositoryError>
 }
 
-export const UserRepository = Context.GenericTag<UserRepository>("UserRepository")
+export class UserRepository extends Context.Tag("UserRepository")<UserRepository, UserRepository>() {}
 
 type RepositoryError =
   | { _tag: "NotFound"; id: string }
   | { _tag: "ValidationError"; errors: unknown }
   | { _tag: "NetworkError"; cause: unknown }
 
-export const makeUserRepository = Effect.gen(function* () {
-  const api = yield* ApiClient
-  
-  return UserRepository.of({
-    listUsers: () =>
-      pipe(
-        api.get<unknown[]>("/users"),
-        Effect.flatMap(data =>
-          Effect.all(data.map(validateUser), { concurrency: "unbounded" })
-        ),
-        Effect.mapError(error => ({
-          _tag: "NetworkError" as const,
-          cause: error
-        }))
-      ),
-    
-    getUser: (id) =>
-      pipe(
-        api.get<unknown>(`/users/${id}`),
-        Effect.flatMap(validateUser),
-        Effect.mapError(error =>
-          error._tag === "InvalidResponse" && error.status === 404
-            ? { _tag: "NotFound" as const, id }
-            : { _tag: "NetworkError" as const, cause: error }
-        )
-      ),
-    
-    createUser: (data) =>
-      pipe(
-        api.post<unknown>("/users", data),
-        Effect.flatMap(validateUser),
-        Effect.mapError(error => ({
-          _tag: "NetworkError" as const,
-          cause: error
-        }))
-      ),
-    
-    updateUser: (id, data) =>
-      pipe(
-        api.post<unknown>(`/users/${id}`, data),
-        Effect.flatMap(validateUser),
-        Effect.mapError(error => ({
-          _tag: "NetworkError" as const,
-          cause: error
-        }))
-      ),
-    
-    deleteUser: (id) =>
-      pipe(
-        api.post("/users/delete", { id }),
-        Effect.asVoid,
-        Effect.mapError(error => ({
-          _tag: "NetworkError" as const,
-          cause: error
-        }))
-      )
-  })
-})
-
 export const UserRepositoryLive = Layer.effect(
   UserRepository,
-  makeUserRepository
+  Effect.gen(function* () {
+    const api = yield* ApiClient
+
+    return {
+      listUsers: () =>
+        pipe(
+          api.get<unknown[]>("/users"),
+          Effect.flatMap(data =>
+            Effect.all(data.map(validateUser), { concurrency: "unbounded" })
+          ),
+          Effect.mapError(error => ({
+            _tag: "NetworkError" as const,
+            cause: error
+          }))
+        ),
+
+      getUser: (id) =>
+        pipe(
+          api.get<unknown>(`/users/${id}`),
+          Effect.flatMap(validateUser),
+          Effect.mapError(error =>
+            error._tag === "InvalidResponse" && error.status === 404
+              ? { _tag: "NotFound" as const, id }
+              : { _tag: "NetworkError" as const, cause: error }
+          )
+        ),
+
+      createUser: (data) =>
+        pipe(
+          api.post<unknown>("/users", data),
+          Effect.flatMap(validateUser),
+          Effect.mapError(error => ({
+            _tag: "NetworkError" as const,
+            cause: error
+          }))
+        ),
+
+      updateUser: (id, data) =>
+        pipe(
+          api.post<unknown>(`/users/${id}`, data),
+          Effect.flatMap(validateUser),
+          Effect.mapError(error => ({
+            _tag: "NetworkError" as const,
+            cause: error
+          }))
+        ),
+
+      deleteUser: (id) =>
+        pipe(
+          api.post("/users/delete", { id }),
+          Effect.asVoid,
+          Effect.mapError(error => ({
+            _tag: "NetworkError" as const,
+            cause: error
+          }))
+        )
+    }
+  })
 )
 ```
 
@@ -1720,35 +1709,33 @@ export interface ActivityStream {
   readonly stream: Stream.Stream<Activity, StreamError>
 }
 
-export const ActivityStream = Context.GenericTag<ActivityStream>("ActivityStream")
+export class ActivityStream extends Context.Tag("ActivityStream")<ActivityStream, ActivityStream>() {}
 
 type StreamError = { _tag: "StreamError"; cause: unknown }
 
-export const makeActivityStream = Effect.gen(function* () {
-  const api = yield* ApiClient
-  
-  // Poll for new activities
-  const pollActivities = pipe(
-    api.get<unknown[]>("/activities/recent"),
-    Effect.flatMap(data =>
-      Effect.all(data.map(validateActivity), { concurrency: "unbounded" })
-    ),
-    Effect.retry(Schedule.exponential("1 second")),
-    Effect.mapError(cause => ({ _tag: "StreamError" as const, cause }))
-  )
-  
-  return ActivityStream.of({
-    stream: pipe(
-      Stream.repeatEffect(pollActivities),
-      Stream.flatMap(activities => Stream.fromIterable(activities)),
-      Stream.schedule(Schedule.fixed("5 seconds"))
-    )
-  })
-})
-
 export const ActivityStreamLive = Layer.effect(
   ActivityStream,
-  makeActivityStream
+  Effect.gen(function* () {
+    const api = yield* ApiClient
+
+    // Poll for new activities
+    const pollActivities = pipe(
+      api.get<unknown[]>("/activities/recent"),
+      Effect.flatMap(data =>
+        Effect.all(data.map(validateActivity), { concurrency: "unbounded" })
+      ),
+      Effect.retry(Schedule.exponential("1 second")),
+      Effect.mapError(cause => ({ _tag: "StreamError" as const, cause }))
+    )
+
+    return {
+      stream: pipe(
+        Stream.repeatEffect(pollActivities),
+        Stream.flatMap(activities => Stream.fromIterable(activities)),
+        Stream.schedule(Schedule.fixed("5 seconds"))
+      )
+    }
+  })
 )
 ```
 
@@ -1935,25 +1922,25 @@ export interface ExportService {
   ) => Effect.Effect<Blob, ExportError>
 }
 
-export const ExportService = Context.GenericTag<ExportService>("ExportService")
+export class ExportService extends Context.Tag("ExportService")<ExportService, ExportService>() {}
 
 type ExportError = { _tag: "ExportFailed"; cause: unknown }
 
-export const makeExportService = Effect.gen(function* () {
+export const ExportServiceLive = Layer.effect(ExportService, Effect.gen(function* () {
   const userRepo = yield* UserRepository
-  
+
   const toCSV = (data: unknown[]): string => {
     if (data.length === 0) return ""
-    
+
     const headers = Object.keys(data[0] as object)
     const rows = data.map(row =>
       headers.map(h => JSON.stringify((row as any)[h])).join(",")
     )
-    
+
     return [headers.join(","), ...rows].join("\n")
   }
-  
-  return ExportService.of({
+
+  return {
     exportUsers: (format) =>
       pipe(
         userRepo.listUsers(),
@@ -1964,22 +1951,20 @@ export const makeExportService = Effect.gen(function* () {
         ),
         Effect.mapError(cause => ({ _tag: "ExportFailed" as const, cause }))
       ),
-    
+
     exportActivities: (startDate, endDate) =>
       pipe(
         // Fetch activities in date range
         api.get<unknown[]>(
           `/activities?start=${startDate.toISOString()}&end=${endDate.toISOString()}`
         ),
-        Effect.map(data => 
+        Effect.map(data =>
           new Blob([JSON.stringify(data, null, 2)], { type: "application/json" })
         ),
         Effect.mapError(cause => ({ _tag: "ExportFailed" as const, cause }))
       )
-  })
-})
-
-export const ExportServiceLive = Layer.effect(ExportService, makeExportService)
+  }
+}))
 ```
 
 ### 7.8 Complete Layer Composition

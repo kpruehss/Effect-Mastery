@@ -18,13 +18,18 @@ export interface TaskService {
   readonly deleteTask: (id: string) => Effect.Effect<void, TaskError>;
 }
 
-export const TaskService = Context.GenericTag<TaskService>("TaskService");
+export class TaskService extends Context.Tag("TaskService")<
+  TaskService,
+  TaskService
+>() {}
 
-const makeTaskService = Effect.gen(function* () {
-  const api = yield* ApiClient;
-  const tasks = yield* Ref.make<Task[]>([]);
+export const TaskServiceLive = Layer.effect(
+  TaskService,
+  Effect.gen(function* () {
+    const api = yield* ApiClient;
+    const tasks = yield* Ref.make<Task[]>([]);
 
-  return TaskService.of({
+    return {
     tasks,
 
     listTasks: (projectId?: string) =>
@@ -111,8 +116,7 @@ const makeTaskService = Effect.gen(function* () {
           );
         }),
       ),
-  });
-});
-
-export const TaskServiceLive = Layer.effect(TaskService, makeTaskService);
+    };
+  })
+);
 ```

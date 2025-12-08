@@ -336,7 +336,10 @@ export interface ApiClient {
   readonly delete: (url: string) => Effect.Effect<void, ApiError>
 }
 
-export const ApiClient = Context.GenericTag<ApiClient>("ApiClient")
+export class ApiClient extends Context.Tag("ApiClient")<
+  ApiClient,
+  ApiClient
+>() {}
 
 interface Config {
   readonly baseUrl: string
@@ -460,13 +463,18 @@ export interface TaskService {
   readonly deleteTask: (id: string) => Effect.Effect<void, TaskError>
 }
 
-export const TaskService = Context.GenericTag<TaskService>("TaskService")
+export class TaskService extends Context.Tag("TaskService")<
+  TaskService,
+  TaskService
+>() {}
 
-const makeTaskService = Effect.gen(function* () {
-  const api = yield* ApiClient
-  const tasks = yield* Ref.make<Task[]>([])
-  
-  return TaskService.of({
+export const TaskServiceLive = Layer.effect(
+  TaskService,
+  Effect.gen(function* () {
+    const api = yield* ApiClient
+    const tasks = yield* Ref.make<Task[]>([])
+
+    return {
     tasks,
     
     listTasks: (projectId?: string) =>
@@ -565,10 +573,9 @@ const makeTaskService = Effect.gen(function* () {
           )
         })
       )
+    };
   })
-})
-
-export const TaskServiceLive = Layer.effect(TaskService, makeTaskService)
+)
 ```
 
 ### Project Service
@@ -589,13 +596,18 @@ export interface ProjectService {
   readonly deleteProject: (id: string) => Effect.Effect<void, ProjectError>
 }
 
-export const ProjectService = Context.GenericTag<ProjectService>("ProjectService")
+export class ProjectService extends Context.Tag("ProjectService")<
+  ProjectService,
+  ProjectService
+>() {}
 
-const makeProjectService = Effect.gen(function* () {
-  const api = yield* ApiClient
-  const projects = yield* Ref.make<Project[]>([])
-  
-  return ProjectService.of({
+export const ProjectServiceLive = Layer.effect(
+  ProjectService,
+  Effect.gen(function* () {
+    const api = yield* ApiClient
+    const projects = yield* Ref.make<Project[]>([])
+
+    return {
     projects,
     
     listProjects: () =>
@@ -642,12 +654,8 @@ const makeProjectService = Effect.gen(function* () {
         ),
         Effect.mapError(() => ({ _tag: "ProjectNotFound" as const, id }))
       )
+    };
   })
-})
-
-export const ProjectServiceLive = Layer.effect(
-  ProjectService,
-  makeProjectService
 )
 ```
 
@@ -667,9 +675,10 @@ export interface WebSocketService {
   readonly send: (message: WebSocketMessage) => Effect.Effect<void>
 }
 
-export const WebSocketService = Context.GenericTag<WebSocketService>(
-  "WebSocketService"
-)
+export class WebSocketService extends Context.Tag("WebSocketService")<
+  WebSocketService,
+  WebSocketService
+>() {}
 
 const makeWebSocketService = Effect.gen(function* () {
   const queue = yield* Queue.unbounded<WebSocketMessage>()
@@ -703,15 +712,15 @@ const makeWebSocketService = Effect.gen(function* () {
       ws.close()
     })
   )
-  
-  return WebSocketService.of({
+
+  return {
     messages: Stream.fromQueue(queue),
-    
+
     send: (message) =>
       Effect.sync(() => {
         ws.send(JSON.stringify(message))
       })
-  })
+  }
 })
 
 export const WebSocketServiceLive = Layer.scoped(

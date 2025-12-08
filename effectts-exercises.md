@@ -525,7 +525,7 @@ interface Logger {
   readonly error: (message: string) => Effect.Effect<void>
 }
 
-const Logger = Context.GenericTag<Logger>("Logger")
+class Logger extends Context.Tag("Logger")<Logger, Logger>() {}
 
 // Console implementation
 const ConsoleLogger: Logger = {
@@ -620,27 +620,27 @@ interface Logger {
   readonly log: (message: string) => Effect.Effect<void>
 }
 
-const Logger = Context.GenericTag<Logger>("Logger")
+class Logger extends Context.Tag("Logger")<Logger, Logger>() {}
 
 interface ApiClient {
   readonly get: <T>(url: string) => Effect.Effect<T, ApiError>
   readonly post: <T, B>(url: string, body: B) => Effect.Effect<T, ApiError>
 }
 
-const ApiClient = Context.GenericTag<ApiClient>("ApiClient")
+class ApiClient extends Context.Tag("ApiClient")<ApiClient, ApiClient>() {}
 
 interface UserService {
   readonly getUser: (id: string) => Effect.Effect<User, UserError>
   readonly createUser: (data: CreateUserData) => Effect.Effect<User, UserError>
 }
 
-const UserService = Context.GenericTag<UserService>("UserService")
+class UserService extends Context.Tag("UserService")<UserService, UserService>() {}
 
-const makeUserService = Effect.gen(function* () {
+const UserServiceLive = Layer.effect(UserService, Effect.gen(function* () {
   const logger = yield* Logger
   const api = yield* ApiClient
-  
-  return UserService.of({
+
+  return {
     getUser: (id) =>
       pipe(
         logger.log(`Fetching user ${id}`),
@@ -648,7 +648,7 @@ const makeUserService = Effect.gen(function* () {
         Effect.mapError(() => ({ _tag: "UserNotFound" as const })),
         Effect.tap(user => logger.log(`Retrieved user ${user.name}`))
       ),
-    
+
     createUser: (data) =>
       pipe(
         logger.log(`Creating user ${data.email}`),
@@ -656,10 +656,8 @@ const makeUserService = Effect.gen(function* () {
         Effect.mapError(() => ({ _tag: "CreateFailed" as const })),
         Effect.tap(user => logger.log(`Created user ${user.id}`))
       )
-  })
-})
-
-const UserServiceLive = Layer.effect(UserService, makeUserService)
+  }
+}))
 
 // Mock implementations
 const LoggerLive = Layer.succeed(Logger, {
@@ -731,16 +729,16 @@ interface PaymentService {
   ) => Effect.Effect<PaymentResult, PaymentError>
 }
 
-const PaymentService = Context.GenericTag<PaymentService>("PaymentService")
+class PaymentService extends Context.Tag("PaymentService")<PaymentService, PaymentService>() {}
 
 // Mock implementation that tracks calls
 interface MockPaymentService extends PaymentService {
   readonly getCalls: () => Effect.Effect<Array<{ amount: number; cardToken: string }>>
 }
 
-const makeMockPaymentService = Effect.gen(function* () {
+const MockPaymentServiceLayer = Layer.effect(PaymentService, Effect.gen(function* () {
   const calls = yield* Ref.make<Array<{ amount: number; cardToken: string }>>([])
-  
+
   return {
     processPayment: (amount: number, cardToken: string) =>
       pipe(
@@ -755,15 +753,10 @@ const makeMockPaymentService = Effect.gen(function* () {
               })
         )
       ),
-    
+
     getCalls: () => Ref.get(calls)
   }
-})
-
-const MockPaymentServiceLayer = Layer.effect(
-  PaymentService,
-  makeMockPaymentService
-)
+}))
 
 // Business logic to test
 const checkout = (amount: number, cardToken: string) =>

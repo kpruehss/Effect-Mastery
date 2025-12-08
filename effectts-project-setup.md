@@ -180,16 +180,14 @@ export interface Logger {
   readonly error: (message: string) => Effect.Effect<void>
 }
 
-export const Logger = Context.GenericTag<Logger>("Logger")
+export class Logger extends Context.Tag("Logger")<Logger, Logger>() {}
 
-const makeLogger = (): Logger => ({
+export const LoggerLive = Layer.succeed(Logger, {
   debug: (message) => Console.log(`[DEBUG] ${message}`),
   info: (message) => Console.log(`[INFO] ${message}`),
   warn: (message) => Console.warn(`[WARN] ${message}`),
   error: (message) => Console.error(`[ERROR] ${message}`)
 })
-
-export const LoggerLive = Layer.succeed(Logger, makeLogger())
 ```
 
 ### 7. App Setup
@@ -751,27 +749,25 @@ export interface UserService {
   readonly listUsers: () => Effect.Effect<User[], UserError>
 }
 
-export const UserService = Context.GenericTag<UserService>("UserService")
+export class UserService extends Context.Tag("UserService")<UserService, UserService>() {}
 
-const makeUserService = Effect.gen(function* () {
+export const UserServiceLive = Layer.effect(UserService, Effect.gen(function* () {
   const api = yield* ApiClient
-  
-  return UserService.of({
+
+  return {
     getUser: (id) =>
       pipe(
         api.get<User>(`/users/${id}`),
         Effect.mapError(() => ({ _tag: "UserNotFound" as const, id }))
       ),
-    
+
     listUsers: () =>
       pipe(
         api.get<User[]>("/users"),
         Effect.mapError(() => ({ _tag: "UserNotFound" as const, id: "all" }))
       )
-  })
-})
-
-export const UserServiceLive = Layer.effect(UserService, makeUserService)
+  }
+}))
 ```
 
 ---

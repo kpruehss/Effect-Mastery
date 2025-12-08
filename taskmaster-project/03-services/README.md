@@ -37,18 +37,21 @@ interface MyService {
 }
 
 // 2. Create Context tag
-const MyService = Context.GenericTag<MyService>("MyService")
+class MyService extends Context.Tag("MyService")<
+  MyService,
+  MyService
+>() {}
 
-// 3. Implement service
-const makeMyService = Effect.gen(function* () {
-  // Setup and dependencies
-  return MyService.of({
-    operation: () => Effect.succeed(result)
+// 3. Create Layer
+const MyServiceLive = Layer.effect(
+  MyService,
+  Effect.gen(function* () {
+    // Setup and dependencies
+    return {
+      operation: () => Effect.succeed(result)
+    }
   })
-})
-
-// 4. Create Layer
-const MyServiceLive = Layer.effect(MyService, makeMyService)
+)
 ```
 
 ### Services We'll Build
@@ -311,17 +314,20 @@ const WebSocketServiceLive = Layer.scoped(
 Services can depend on other services:
 
 ```typescript
-const makeTaskService = Effect.gen(function* () {
-  const api = yield* ApiClient
-  const logger = yield* Logger
+const TaskServiceLive = Layer.effect(
+  TaskService,
+  Effect.gen(function* () {
+    const api = yield* ApiClient
+    const logger = yield* Logger
 
-  return TaskService.of({
-    createTask: (input) => pipe(
-      logger.log("Creating task"),
-      Effect.flatMap(() => api.post("/tasks", input))
-    )
+    return {
+      createTask: (input) => pipe(
+        logger.log("Creating task"),
+        Effect.flatMap(() => api.post("/tasks", input))
+      )
+    }
   })
-})
+)
 ```
 
 ---

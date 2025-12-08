@@ -21,7 +21,10 @@ export interface ApiClient {
 }
 
 // Context tag
-export const ApiClient = Context.GenericTag<ApiClient>("ApiClient");
+export class ApiClient extends Context.Tag("ApiClient")<
+  ApiClient,
+  ApiClient
+>() {}
 
 // Configuration
 interface Config {
